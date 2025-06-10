@@ -965,7 +965,7 @@ def main():
             web_app=set_webhook_and_start(),
             port=port,
             listen='0.0.0.0',
-            secret_token=os.getenv('WEBHOOK_SECRET', 'SET_YOUR_SECRET_HERE'),
+            secret_token=os.getenv('WEBHOOK_SECRET', os.urandom(24).hex()),
             bootstrap=set_webhook_and_start
         )
     else:
