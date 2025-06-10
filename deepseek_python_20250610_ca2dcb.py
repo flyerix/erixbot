@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 
 # Configurazione
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
+ADMIN_IDS = os.getenv('ADMIN_CHAT_IDS', '').split(',')  # Allow multiple admin IDs
 COSTO_MENSILE = 15  # €15 al mese
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -249,11 +249,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
             ]
         ]
         
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await send_to_all_admins(context, admin_text, InlineKeyboardMarkup(keyboard))
         
         # Conferma all'utente
         keyboard = [
@@ -331,7 +327,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # Gestione risposta admin a segnalazione
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if str(update.effective_user.id) not in ADMIN_IDS:
         return
     
     if "contact_user" not in context.user_data:
@@ -521,10 +517,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=admin_text,
-            reply_markup=InlineKeyboardMarkup(keyboard)
+        await send_to_all_admins(context, admin_text, InlineKeyboardMarkup(keyboard))
             
         await update.message.reply_text(
             "📬 Richiesta inviata all'amministratore!\n\n"
@@ -855,7 +848,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
 
 # Comando admin per forzare il controllo
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if str(update.effective_user.id) not in ADMIN_IDS:
         await update.message.reply_text("❌ Solo l'amministratore può usare questo comando!")
         return
     
@@ -885,6 +878,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Health check per Render
 async def health_check(request):
     return web.Response(text="Bot is running")
+
+# Funzione per inviare messaggi a tutti gli admin
+async def send_to_all_admins(context, text, reply_markup=None):
+    for admin_id in ADMIN_IDS:
+        if not admin_id:
+            continue
+        try:
+            if reply_markup:
+                await context.bot.send_message(
+                    chat_id=int(admin_id),
+                    text=text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await context.bot.send_message(
+                    chat_id=int(admin_id),
+                    text=text
+                )
+        except Exception as e:
+            logger.error(f"Errore invio messaggio ad admin {admin_id}: {e}")
 
 # Main
 def main():
@@ -935,8 +948,9 @@ def main():
     application.add_handler(report_handler)
     
     # Handler per risposte admin
+    admin_filter = filters.Chat(chat_id=[int(admin_id) for admin_id in ADMIN_IDS if admin_id])
     application.add_handler(MessageHandler(
-        filters.TEXT & filters.Chat(chat_id=ADMIN_ID),
+        filters.TEXT & admin_filter,
         handle_admin_reply
     ))
 
