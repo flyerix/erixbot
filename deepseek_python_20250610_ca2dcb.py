@@ -23,7 +23,7 @@ from telegram.ext import (
 
 # Configurazione
 TOKEN = os.getenv("AAGYlO-aF-dK10bpAlf2ZViFOKLgc2wWHI4")
-ADMIN_ID = int(os.getenv("691735614"))
+ADMIN_ID = int(os.getenv("691735614")
 DB_NAME = "database.db"
 COSTO_MENSILE = 15  # €15 al mese
 
