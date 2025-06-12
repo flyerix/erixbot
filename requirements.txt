@@ -1,4 +1,2 @@
-python-telegram-bot
+python-telegram-bot[job-queue]==20.3
 python-dotenv
-psycopg2-binary
-aiohttp
