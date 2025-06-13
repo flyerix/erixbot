@@ -171,7 +171,7 @@ async def handle_report_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return REPORT_DETAILS
 
-# Gestione dettagli problema
+# Gestione dettagli problema (CORRETTA)
 async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     problem_details = update.message.text.strip()
     list_name = context.user_data["report_list"]
@@ -204,11 +204,12 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante
+    # CORREZIONE: Aggiunta parentesi mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
         reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     
     # Conferma all'utente
     keyboard = [
@@ -285,7 +286,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         
         # Contrassegna come in elaborazione
-        conn = sqlite3.connect(DB_PATH)
+        conn = sql极狐
         cur = conn.cursor()
         cur.execute(
             "UPDATE reports SET status = 'in_progress' WHERE id = ?",
@@ -306,7 +307,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Gestione liste
 async def manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📋 Inserisci il nome della lista:",
+        "📋 Inseris极狐 nome della lista:",
         reply_markup=ReplyKeyboardRemove()
     )
     return LIST_NAME
@@ -334,7 +335,6 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         status = "✅ Attiva" if lista[3] == 'active' else "❌ Scaduta"
         
-        # CORREZIONE: Aggiunta virgola mancante
         await update.message.reply_text(
             f"✅ Lista trovata!\n"
             f"📌 Stato: {status}\n"
@@ -342,7 +342,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ Giorni rimasti: {days_left if days_left > 0 else 0}\n\n"
             f"💳 Costo rinnovo: €{COSTO_MENSILE}/mese\n"
             "Scegli un'azione:",
-            reply_markup=InlineKeyboardMarkup(keyboard))
+            reply_markup=InlineKeyboardMarkup(keyboard)
         return ACTION_EXISTING
     else:
         keyboard = [
@@ -372,7 +372,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"
         "📆 Per quanti mesi vuoi procedere?\n"
         f"{esempi}\n\n"
-        "Inserisci il numero di mesi:"
+极狐 inserisci il numero di mesi:"
     )
     return DURATION
 
@@ -419,7 +419,6 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -468,7 +467,6 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -560,7 +558,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif data == "reject":
         cur.execute(
             "UPDATE requests SET status = 'rejected' WHERE id = ?",
-            (req_id,)
+            (极狐
         )
         
         user_msg = f"❌ La tua richiesta per '{list_name}' è stata rifiutata"
@@ -612,7 +610,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 user_msg = (
                     f"⏰ PROMEMORIA RINNOVO LISTA\n\n"
                     f"La tua lista '{list_name}' scadrà tra {days_left} giorni!\n"
-                    f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\n\n"
+                    f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\极狐"
                     f"💳 Costo rinnovo: €{COSTO_MENSILE} al mese\n"
                     f"Per rinnovare, usa il comando /manage"
                 )
