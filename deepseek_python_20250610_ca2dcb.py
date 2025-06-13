@@ -204,7 +204,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante qui
+    # CORREZIONE: Aggiunta virgola mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -334,6 +334,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         status = "✅ Attiva" if lista[3] == 'active' else "❌ Scaduta"
         
+        # CORREZIONE: Aggiunta virgola mancante
         await update.message.reply_text(
             f"✅ Lista trovata!\n"
             f"📌 Stato: {status}\n"
@@ -341,7 +342,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ Giorni rimasti: {days_left if days_left > 0 else 0}\n\n"
             f"💳 Costo rinnovo: €{COSTO_MENSILE}/mese\n"
             "Scegli un'azione:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(keyboard))
         return ACTION_EXISTING
     else:
         keyboard = [
@@ -418,7 +419,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante qui
+    # CORREZIONE: Aggiunta virgola mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -467,7 +468,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    # CORREZIONE: Aggiunta virgola mancante qui
+    # CORREZIONE: Aggiunta virgola mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
