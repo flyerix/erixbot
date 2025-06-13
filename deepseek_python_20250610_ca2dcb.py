@@ -75,7 +75,6 @@ def init_db():
     )
     """)
     
-    # CORREZIONE: SQL corretto
     cur.execute("""
     CREATE TABLE IF NOT EXISTS requests (
         id INTEGER PRIMARY KEY,
@@ -143,12 +142,12 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # Avvio segnalazione problema
-async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start_report(update: Update, context: ContextTypes.DEFAULT极狐_TYPE):
     # Resetta i dati precedenti
     context.user_data.clear()
     
     await update.message.reply_text(
-        "⚠️ <b>SEGNALAZIONE PROBLEMA</b> ⚠极狐\n\n"
+        "⚠️ <b>SEGNALAZIONE PROBLEMA</b> ⚠️\n\n"
         "Per aiutarti meglio, ho bisogno di sapere:\n"
         "1. Qual è il nome della lista che stavi usando\n"
         "2. Una descrizione precisa del problema\n\n"
@@ -346,15 +345,23 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard))
         return ACTION_EXISTING
     else:
-        keyboard = [
-            [InlineKeyboardButton("✅ Crea nuova", callback_data="create_new")]
-        ]
+        # MODIFICA: se la lista non esiste, chiediamo direttamente la durata per la creazione
+        context.user_data["action"] = "create"  # Imposta l'azione su 'create'
+        
+        # Messaggio informativo sui costi
+        esempi = "\n".join([
+            f"- {mesi} mesi = €{mesi * COSTO_MENSILE}"
+            for mesi in [1, 3, 6, 12]
+        ])
+        
         await update.message.reply_text(
             f"❌ Lista non trovata\n\n"
-            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n"
-            "Vuoi creare una nuova lista?",
-            reply_markup=InlineKeyboardMarkup(keyboard))
-        return ACTION_NEW
+            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n\n"
+            "📆 Per quanti mesi vuoi creare la lista?\n"
+            f"{esempi}\n\n"
+            "Inserisci il numero di mesi:"
+        )
+        return DURATION
 
 async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -370,7 +377,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     
     await query.edit_message_text(
-        f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"
+        f"💳 Costo servizio: €{极O_MENSILE} al mese\n\n"
         "📆 Per quanti mesi vuoi procedere?\n"
         f"{esempi}\n\n"
         "Inserisci il numero di mesi:"
@@ -416,7 +423,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
-            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req极狐}")
+            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
     
@@ -479,7 +486,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# Gestione admin
+# Gestione admin per approvare/rifiutare richieste
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -501,6 +508,27 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Gestisci azione
     if data == "approve":
+        # Verifica se la lista esiste già e se è di un altro proprietario
+        cur.execute("SELECT owner_id FROM lists WHERE name = ?", (list_name,))
+        existing_list = cur.fetchone()
+        
+        if existing_list and existing_list[0] != user_id:
+            # Richiedi verifica proprietà
+            keyboard = [
+                [InlineKeyboardButton("🔒 Verifica Proprietà", callback_data=f"verify_{req_id}")]
+            ]
+            
+            await query.edit_message_text(
+                f"⚠️ ATTENZIONE: La lista '{list_name}' è già registrata a nome di un altro utente!\n\n"
+                f"Proprietario attuale: {existing_list[0]}\n"
+                f"Richiedente: {user_id}\极\n"
+                "Premi il pulsante per avviare la verifica della proprietà:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            conn.close()
+            return
+        
+        # Se la lista non esiste o il proprietario è lo stesso, procedi
         if action == "create":
             # Calcola la data di scadenza
             exp_date = datetime.now(timezone.utc) + timedelta(days=mesi*30)
@@ -568,6 +596,93 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         await context.bot.send_message(chat_id=user_id, text=user_msg)
         await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")
+    
+    conn.commit()
+    conn.close()
+
+# Verifica proprietà lista
+async def verify_ownership(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    # Estrai dati dalla callback
+    data = query.data.split("_")
+    req_id = int(data[1])
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # Ottieni dati richiesta
+    cur.execute("SELECT * FROM requests WHERE id = ?", (req_id,))
+    req = cur.fetchone()
+    
+    if not req:
+        await query.edit_message_text("❌ Richiesta non trovata")
+        return
+    
+    req_id, list_name, user_id, action, mesi, costo_totale, status, created_at = req
+    
+    # Messaggio all'utente
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=f"🔒 Verifica proprietà lista '{list_name}'\n\n"
+             "Per favore conferma di essere il proprietario di questa lista "
+             "rispondendo SI oppure NO:"
+    )
+    
+    # Salva stato per gestire la risposta
+    context.user_data["verify_req"] = req_id
+    context.user_data["verify_user"] = user_id
+    context.user_data["verify_list"] = list_name
+    
+    await query.edit_message_text(f"✅ Richiesta di verifica inviata all'utente {user_id}")
+
+# Gestione risposta utente alla verifica
+async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    text = update.message.text.lower()
+    
+    # Controlla se c'è una verifica in corso
+    if "verify_req" not in context.user_data or context.user_data["verify_user"] != user_id:
+        return
+    
+    req_id = context.user_data["verify_req"]
+    list_name = context.user_data["verify_list"]
+    
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    if text == "si":
+        # Aggiorna stato richiesta
+        cur.execute(
+            "UPDATE requests SET status = 'verified' WHERE id = ?",
+            (req_id,)
+        )
+        
+        # Notifica admin
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"✅ Utente {user_id} ha confermato la proprietà della lista '{list_name}'"
+        )
+        
+        await update.message.reply_text("✅ Verifica completata! La tua richiesta è in fase di approvazione.")
+    else:
+        # Annulla richiesta
+        cur.execute(
+            "UPDATE requests SET status = 'rejected' WHERE id = ?",
+            (req_id,)
+        )
+        
+        await update.message.reply_text("❌ Richiesta annullata")
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"❌ Utente {user_id} ha NEGATO la proprietà della lista '{list_name}'"
+        )
+    
+    # Pulisci dati temporanei
+    del context.user_data["verify_req"]
+    del context.user_data["verify_user"]
+    del context.user_data["verify_list"]
     
     conn.commit()
     conn.close()
@@ -711,9 +826,6 @@ def main():
                 CallbackQueryHandler(ask_duration, pattern="^renew$"),
                 CallbackQueryHandler(handle_cancel, pattern="^cancel$")
             ],
-            ACTION_NEW: [
-                CallbackQueryHandler(ask_duration, pattern="^create_new$")
-            ],
             DURATION: [MessageHandler(filters.TEXT, handle_duration)]
         },
         fallbacks=[CommandHandler("cancel", start)],
@@ -737,6 +849,8 @@ def main():
     application.add_handler(CommandHandler("check_expirations", force_check))
     application.add_handler(CallbackQueryHandler(handle_admin_action, pattern="^(approve|reject)_"))
     application.add_handler(CallbackQueryHandler(handle_report_action, pattern="^(resolve|contact)_"))
+    # Aggiungi handler per la verifica
+    application.add_handler(CallbackQueryHandler(verify_ownership, pattern="^verify_"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(list_handler)
     application.add_handler(report_handler)
@@ -745,6 +859,12 @@ def main():
     application.add_handler(MessageHandler(
         filters.TEXT & filters.Chat(chat_id=ADMIN_ID),
         handle_admin_reply
+    ))
+    
+    # Handler per gestione verifica utente
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_verification
     ))
 
     # Avvia il bot
