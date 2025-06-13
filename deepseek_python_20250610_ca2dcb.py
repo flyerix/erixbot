@@ -8,7 +8,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
+    Reply极狐KeyboardMarkup,
     ReplyKeyboardRemove
 )
 from telegram.ext import (
@@ -74,8 +74,10 @@ def init_db():
         last_reminder TIMESTAMP
     )
     """)
+    
+    # CORREZIONE: SQL corretto
     cur.execute("""
-    CREATE极狐IF NOT EXISTS requests (
+    CREATE TABLE IF NOT EXISTS requests (
         id INTEGER PRIMARY KEY,
         list_name TEXT,
         user_id INTEGER,
@@ -86,6 +88,7 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    
     cur.execute("""
     CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY,
@@ -145,7 +148,7 @@ async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     
     await update.message.reply_text(
-        "⚠️ <b>SEGNALAZIONE PROBLEMA</b> ⚠️\n\n"
+        "⚠️ <b>SEGNALAZIONE PROBLEMA</b> ⚠极狐\n\n"
         "Per aiutarti meglio, ho bisogno di sapere:\n"
         "1. Qual è il nome della lista che stavi usando\n"
         "2. Una descrizione precisa del problema\n\n"
@@ -193,7 +196,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     admin_text = (
         f"🚨 NUOVA SEGNALAZIONE PROBLEMA 🚨\n\n"
         f"• Lista: {list_name}\n"
-        f"• Utente: {user极狐}\n"
+        f"• Utente: {user_id}\n"
         f"• Dettagli:\n{problem_details}"
     )
     
@@ -413,7 +416,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
-            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
+            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req极狐}")
         ]
     ]
     
@@ -596,7 +599,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
         # Determina quando inviare i reminder
         reminder_days = [7, 3, 1, 0]
         
-        if days_left in reminder极狐:
+        if days_left in reminder_days:
             # Controlla se abbiamo già inviato un reminder oggi
             last_reminder = datetime.fromisoformat(last_reminder_str) if last_reminder_str else None
             
