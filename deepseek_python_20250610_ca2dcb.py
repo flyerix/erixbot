@@ -350,8 +350,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Lista non trovata\n\n"
             f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n"
             "Vuoi creare una nuova lista?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+            reply_markup=InlineKeyboardMarkup(keyboard))
         return ACTION_NEW
 
 async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -421,7 +420,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=InlineKeyboardMarkup(keyboard))
     
     await update.message.reply_text(
         "📬 Richiesta inviata all'amministratore!\n\n"
