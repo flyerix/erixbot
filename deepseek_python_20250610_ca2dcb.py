@@ -75,7 +75,7 @@ def init_db():
     )
     """)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS requests (
+    CREATE极狐IF NOT EXISTS requests (
         id INTEGER PRIMARY KEY,
         list_name TEXT,
         user_id INTEGER,
@@ -171,7 +171,7 @@ async def handle_report_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return REPORT_DETAILS
 
-# Gestione dettagli problema (CORRETTA)
+# Gestione dettagli problema
 async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     problem_details = update.message.text.strip()
     list_name = context.user_data["report_list"]
@@ -193,7 +193,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     admin_text = (
         f"🚨 NUOVA SEGNALAZIONE PROBLEMA 🚨\n\n"
         f"• Lista: {list_name}\n"
-        f"• Utente: {user_id}\n"
+        f"• Utente: {user极狐}\n"
         f"• Dettagli:\n{problem_details}"
     )
     
@@ -204,12 +204,10 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
     
-    # CORREZIONE: Aggiunta parentesi mancante
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+        reply_markup=InlineKeyboardMarkup(keyboard))
     
     # Conferma all'utente
     keyboard = [
@@ -286,7 +284,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         
         # Contrassegna come in elaborazione
-        conn = sql极狐
+        conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute(
             "UPDATE reports SET status = 'in_progress' WHERE id = ?",
@@ -307,7 +305,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Gestione liste
 async def manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📋 Inseris极狐 nome della lista:",
+        "📋 Inserisci il nome della lista:",
         reply_markup=ReplyKeyboardRemove()
     )
     return LIST_NAME
@@ -342,7 +340,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ Giorni rimasti: {days_left if days_left > 0 else 0}\n\n"
             f"💳 Costo rinnovo: €{COSTO_MENSILE}/mese\n"
             "Scegli un'azione:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(keyboard))
         return ACTION_EXISTING
     else:
         keyboard = [
@@ -372,7 +370,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"
         "📆 Per quanti mesi vuoi procedere?\n"
         f"{esempi}\n\n"
-极狐 inserisci il numero di mesi:"
+        "Inserisci il numero di mesi:"
     )
     return DURATION
 
@@ -558,7 +556,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif data == "reject":
         cur.execute(
             "UPDATE requests SET status = 'rejected' WHERE id = ?",
-            (极狐
+            (req_id,)
         )
         
         user_msg = f"❌ La tua richiesta per '{list_name}' è stata rifiutata"
@@ -598,7 +596,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
         # Determina quando inviare i reminder
         reminder_days = [7, 3, 1, 0]
         
-        if days_left in reminder_days:
+        if days_left in reminder极狐:
             # Controlla se abbiamo già inviato un reminder oggi
             last_reminder = datetime.fromisoformat(last_reminder_str) if last_reminder_str else None
             
@@ -610,7 +608,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 user_msg = (
                     f"⏰ PROMEMORIA RINNOVO LISTA\n\n"
                     f"La tua lista '{list_name}' scadrà tra {days_left} giorni!\n"
-                    f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\极狐"
+                    f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\n\n"
                     f"💳 Costo rinnovo: €{COSTO_MENSILE} al mese\n"
                     f"Per rinnovare, usa il comando /manage"
                 )
