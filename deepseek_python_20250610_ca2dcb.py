@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 import os
+import pathlib
 import asyncio
 from datetime import datetime, timedelta, timezone
 from telegram import (
@@ -20,12 +21,17 @@ from telegram.ext import (
     CallbackQueryHandler,
     JobQueue
 )
+from flask import Flask
+from threading import Thread
 
 # Configurazione
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
+ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # Fallback per sviluppo
 DB_NAME = "database.db"
 COSTO_MENSILE = 15  # €15 al mese
+
+# Percorso assoluto per il database
+DB_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), DB_NAME)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -33,12 +39,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Server web per Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Bot Telegram is running and ready!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def start_web_server():
+    t = Thread(target=run_web_server)
+    t.daemon = True
+    t.start()
+
 # Stati conversazione
 LIST_NAME, ACTION_EXISTING, ACTION_NEW, DURATION, REPORT_LIST, REPORT_DETAILS = range(6)
 
 # Inizializza DB
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     # Tabelle
     cur.execute("""
@@ -156,13 +178,14 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.message.from_user.id
     
     # Salva segnalazione nel DB
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO reports (list_name, user_id, problem_details) "
         "VALUES (?, ?, ?)",
         (list_name, user_id, problem_details)
     )
+    report_id = cur.lastrowid
     conn.commit()
     conn.close()
     
@@ -176,7 +199,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Gestita", callback_data=f"resolve_{cur.lastrowid}"),
+            InlineKeyboardButton("✅ Gestita", callback_data=f"resolve_{report_id}"),
             InlineKeyboardButton("📝 Contatta", callback_data=f"contact_{user_id}")
         ]
     ]
@@ -185,7 +208,6 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         chat_id=ADMIN_ID,
         text=admin_text,
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
     
     # Conferma all'utente
     keyboard = [
@@ -206,10 +228,10 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     
-    data, report_id = query.data.split("_")
-    report_id = int(report_id)
+    data, value = query.data.split("_")
+    report_id = int(value)
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
     if data == "resolve":
@@ -223,7 +245,12 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
     elif data == "contact":
         # Ottieni l'ID dell'utente
         cur.execute("SELECT user_id FROM reports WHERE id = ?", (report_id,))
-        user_id = cur.fetchone()[0]
+        result = cur.fetchone()
+        if result:
+            user_id = result[0]
+        else:
+            await query.edit_message_text("❌ Segnalazione non trovata")
+            return
         
         # Salva l'ID per rispondere
         context.user_data["contact_user"] = user_id
@@ -233,7 +260,6 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
             f"✉️ Invia il messaggio per l'utente {user_id}:\n"
             "(Scrivi /cancel per annullare)"
         )
-        # Non modifichiamo il messaggio originale, ma rispondiamo con un nuovo messaggio
     
     conn.commit()
     conn.close()
@@ -258,7 +284,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         
         # Contrassegna come in elaborazione
-        conn = sqlite3.connect(DB_NAME)
+        conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute(
             "UPDATE reports SET status = 'in_progress' WHERE id = ?",
@@ -288,7 +314,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["list_name"] = list_name
     
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT * FROM lists WHERE name = ?", (list_name,))
     lista = cur.fetchone()
@@ -315,7 +341,6 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💳 Costo rinnovo: €{COSTO_MENSILE}/mese\n"
             "Scegli un'azione:",
             reply_markup=InlineKeyboardMarkup(keyboard)
-        )
         return ACTION_EXISTING
     else:
         keyboard = [
@@ -365,13 +390,14 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     costo_totale = mesi * COSTO_MENSILE
 
     # Salva richiesta nel DB
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO requests (list_name, user_id, action, months, total_cost) "
         "VALUES (?, ?, ?, ?, ?)",
         (list_name, user_id, action, mesi, costo_totale)
     )
+    req_id = cur.lastrowid
     conn.commit()
     conn.close()
 
@@ -387,8 +413,8 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{cur.lastrowid}"),
-            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{cur.lastrowid}")
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
+            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
     
@@ -396,8 +422,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=ADMIN_ID,
         text=admin_text,
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
+    
     await update.message.reply_text(
         "📬 Richiesta inviata all'amministratore!\n\n"
         f"🔍 Dettagli:\n"
@@ -416,13 +441,14 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     # Salva richiesta di cancellazione
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO requests (list_name, user_id, action) "
         "VALUES (?, ?, 'cancel')",
         (list_name, user_id)
     )
+    req_id = cur.lastrowid
     conn.commit()
     conn.close()
 
@@ -435,17 +461,16 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{cur.lastrowid}"),
-            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{cur.lastrowid}")
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
+            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
     
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
+        reply_markup=InlineKeyboardMarkup(keyboard))
+    
     await query.edit_message_text(
         "📬 Richiesta di cancellazione inviata all'amministratore!\n"
         "Riceverai una notifica quando verrà elaborata."
@@ -459,7 +484,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     data, req_id = query.data.split("_")
     req_id = int(req_id)
 
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
     # Ottieni dati richiesta
@@ -547,7 +572,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # Sistema di reminder
 async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     now = datetime.now(timezone.utc)
     
@@ -655,9 +680,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Main
 def main():
+    # Avvia il server web per Render
+    start_web_server()
+    
+    # Inizializza il database
     init_db()
+    
+    # Verifica configurazione
+    if not TOKEN:
+        logger.error("❌ TOKEN non configurato!")
+        return
+    if ADMIN_ID == 0:
+        logger.warning("⚠️ ADMIN_CHAT_ID non configurato, funzionalità admin limitate")
+    
+    # Crea l'applicazione Telegram
     application = Application.builder().token(TOKEN).build()
-
+    
     # Aggiungi job per i reminder
     job_queue = application.job_queue
     job_queue.run_repeating(check_expirations, interval=86400, first=10)  # Ogni 24 ore
