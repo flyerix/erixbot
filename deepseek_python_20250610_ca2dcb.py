@@ -8,7 +8,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Reply极狐KeyboardMarkup,
+    ReplyKeyboardMarkup,
     ReplyKeyboardRemove
 )
 from telegram.ext import (
