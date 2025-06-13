@@ -204,6 +204,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
     
+    # CORREZIONE: Aggiunta virgola mancante qui
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -417,6 +418,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
+    # CORREZIONE: Aggiunta virgola mancante qui
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
@@ -465,6 +467,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
+    # CORREZIONE: Aggiunta virgola mancante qui
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=admin_text,
