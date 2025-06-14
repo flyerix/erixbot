@@ -246,6 +246,8 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
+
+            )
     except Exception as e:
         logger.error(f"Errore nell'invio della notifica admin: {e}")
     
