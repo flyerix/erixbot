@@ -2,6 +2,7 @@ import sqlite3
 import os
 import pathlib
 from datetime import datetime, timedelta, timezone
+import json
 
 # Configurazione
 DB_NAME = "database.db"
@@ -13,20 +14,27 @@ def populate_database():
     
     print("Inserimento liste esistenti nel database\n")
     
-    while True:
-        print("\n" + "="*50)
-        list_name = input("Nome lista (o 'exit' per terminare): ").strip()
-        if list_name.lower() == 'exit':
-            break
-            
-        owner_id = input("ID proprietario: ").strip()
-        if not owner_id.isdigit():
-            print("❌ ID deve essere un numero!")
-            continue
-            
-        mesi = input("Mesi rimanenti: ").strip()
-        if not mesi.isdigit():
-            print("❌ Mesi deve essere un numero!")
+    # Leggi le liste dalla variabile d'ambiente
+    lists_json = os.getenv("EXISTING_LISTS")
+    if not lists_json:
+        print("❌ Variabile d'ambiente EXISTING_LISTS non trovata")
+        return
+    
+    try:
+        lists = json.loads(lists_json)
+    except json.JSONDecodeError as e:
+        print(f"❌ Errore nel parsing di EXISTING_LISTS: {e}")
+        return
+    
+    print(f"Trovate {len(lists)} liste da inserire")
+    
+    for lista in lists:
+        list_name = lista.get("name")
+        owner_id = lista.get("owner_id")
+        mesi = lista.get("mesi")
+        
+        if not list_name or not owner_id or not mesi:
+            print(f"❌ Dati mancanti per una lista: {lista}")
             continue
             
         # Calcola scadenza
