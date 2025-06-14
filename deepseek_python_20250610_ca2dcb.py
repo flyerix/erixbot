@@ -60,7 +60,7 @@ LIST_NAME, ACTION_EXISTING, ACTION_NEW, DURATION, REPORT_LIST, REPORT_DETAILS = 
 
 # Inizializza DB
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite极3.connect(DB_PATH)
     cur = conn.cursor()
     # Tabelle
     cur.execute("""
@@ -142,7 +142,7 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # Avvio segnalazione problema
-async def start_report(update: Update, context: ContextTypes.DEFAULT极狐_TYPE):
+async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):  # CORRETTO
     # Resetta i dati precedenti
     context.user_data.clear()
     
@@ -345,7 +345,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard))
         return ACTION_EXISTING
     else:
-        # MODIFICA: se la lista non esiste, chiediamo direttamente la durata per la creazione
+        # Se la lista non esiste, chiediamo direttamente la durata per la creazione
         context.user_data["action"] = "create"  # Imposta l'azione su 'create'
         
         # Messaggio informativo sui costi
@@ -377,7 +377,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     
     await query.edit_message_text(
-        f"💳 Costo servizio: €{极O_MENSILE} al mese\n\n"
+        f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"  # CORRETTO
         "📆 Per quanti mesi vuoi procedere?\n"
         f"{esempi}\n\n"
         "Inserisci il numero di mesi:"
@@ -433,7 +433,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard))
     
     await update.message.reply_text(
-        "📬 Richiesta inviata all'amministratore!\n\n"
+极       "📬 Richiesta inviata all'amministratore!\n\n"
         f"🔍 Dettagli:\n"
         f"- Azione: {action}\n"
         f"- Durata: {mesi} mesi\n"
@@ -521,7 +521,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(
                 f"⚠️ ATTENZIONE: La lista '{list_name}' è già registrata a nome di un altro utente!\n\n"
                 f"Proprietario attuale: {existing_list[0]}\n"
-                f"Richiedente: {user_id}\极\n"
+                f"Richiedente: {user_id}\n"
                 "Premi il pulsante per avviare la verifica della proprietà:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -656,7 +656,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Aggiorna stato richiesta
         cur.execute(
             "UPDATE requests SET status = 'verified' WHERE id = ?",
-            (req_id,)
+            (req极,)
         )
         
         # Notifica admin
