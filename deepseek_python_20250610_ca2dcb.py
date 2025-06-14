@@ -34,7 +34,7 @@ COSTO_MENSILE = 15  # €15 al mese
 DB_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), DB_NAME)
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(level极ame)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ LIST_NAME, ACTION_EXISTING, ACTION_NEW, DURATION, REPORT_LIST, REPORT_DETAILS = 
 
 # Inizializza DB
 def init_db():
-    conn = sqlite极3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     # Tabelle
     cur.execute("""
@@ -142,7 +142,7 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # Avvio segnalazione problema
-async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):  # CORRETTO
+async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Resetta i dati precedenti
     context.user_data.clear()
     
@@ -254,7 +254,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text("❌ Segnalazione non trovata")
             return
         
-        # Salva l'ID per rispondere
+        # Salva l极ID per rispondere
         context.user_data["contact_user"] = user_id
         context.user_data["report_id"] = report_id
         
@@ -377,7 +377,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
     
     await query.edit_message_text(
-        f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"  # CORRETTO
+        f"💳 Costo servizio: €{COSTO_MENSILE} al mese\n\n"
         "📆 Per quanti mesi vuoi procedere?\n"
         f"{esempi}\n\n"
         "Inserisci il numero di mesi:"
@@ -433,7 +433,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard))
     
     await update.message.reply_text(
-极       "📬 Richiesta inviata all'amministratore!\n\n"
+        "📬 Richiesta inviata all'amministratore!\n\n"
         f"🔍 Dettagli:\n"
         f"- Azione: {action}\n"
         f"- Durata: {mesi} mesi\n"
@@ -624,7 +624,7 @@ async def verify_ownership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Messaggio all'utente
     await context.bot.send_message(
-        chat_id=user_id,
+        chat_id=user极,
         text=f"🔒 Verifica proprietà lista '{list_name}'\n\n"
              "Per favore conferma di essere il proprietario di questa lista "
              "rispondendo SI oppure NO:"
@@ -656,7 +656,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Aggiorna stato richiesta
         cur.execute(
             "UPDATE requests SET status = 'verified' WHERE id = ?",
-            (req极,)
+            (req_id,)
         )
         
         # Notifica admin
