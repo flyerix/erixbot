@@ -1,14 +1,65 @@
 import sqlite3
 import os
 import pathlib
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import datetime, timedelta, timezone
 
 # Configurazione
 DB_NAME = "database.db"
 DB_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), DB_NAME)
 
+def init_db():
+    """Crea le tabelle necessarie se non esistono"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    
+    # Tabella lists
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS lists (
+        id INTEGER PRIMARY KEY,
+        name TEXT UNIQUE,
+        owner_id INTEGER,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expiration TIMESTAMP,
+        last_reminder TIMESTAMP
+    )
+    """)
+    
+    # Tabella requests
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS requests (
+        id INTEGER PRIMARY KEY,
+        list_name TEXT,
+        user_id INTEGER,
+        action TEXT,
+        months INTEGER,
+        total_cost REAL,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    # Tabella reports
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY,
+        list_name TEXT,
+        user_id INTEGER,
+        problem_details TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    conn.commit()
+    conn.close()
+    print("✅ Tabelle create con successo")
+
 def populate_database():
+    # Prima crea le tabelle
+    init_db()
+    
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
