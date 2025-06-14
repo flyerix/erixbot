@@ -3,6 +3,8 @@ import sqlite3
 import os
 import pathlib
 import asyncio
+import html
+import traceback
 from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
@@ -34,7 +36,7 @@ COSTO_MENSILE = 15  # €15 al mese
 DB_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), DB_NAME)
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(level极ame)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ def init_db():
     
     cur.execute("""
     CREATE TABLE IF NOT EXISTS requests (
-        id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY极,
         list_name TEXT,
         user_id INTEGER,
         action TEXT,
@@ -100,6 +102,38 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
+# Gestore globale degli errori
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Gestore globale degli errori."""
+    logger.error("⚠️⚠️⚠️ ECCEZIONE NON GESTITA ⚠️⚠️⚠️", exc_info=context.error)
+    
+    # Prepara il traceback
+    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+    tb_string = ''.join(tb_list)
+    
+    # Costruisci il messaggio di errore
+    error_message = (
+        f"🚨 ERRORE CRITICO NEL BOT 🚨\n\n"
+        f"• Eccezione: {type(context.error).__name__}\n"
+        f"• Messaggio: {context.error}\n\n"
+        f"Traceback completo:\n<pre>{html.escape(tb_string)}</pre>"
+    )
+    
+    # Invia la notifica all'amministratore
+    try:
+        if ADMIN_ID:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=error_message,
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Impossibile inviare notifica errore: {e}")
+    
+    # Log dell'errore su console
+    logger.error(f"Update: {update}")
+    logger.error(f"Context: {context}")
 
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206,10 +240,14 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
         ]
     ]
     
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        if ADMIN_ID:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_text,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+    except Exception as e:
+        logger.error(f"Errore nell'invio della notifica admin: {e}")
     
     # Conferma all'utente
     keyboard = [
@@ -254,7 +292,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.edit_message_text("❌ Segnalazione non trovata")
             return
         
-        # Salva l极ID per rispondere
+        # Salva l'ID per rispondere
         context.user_data["contact_user"] = user_id
         context.user_data["report_id"] = report_id
         
@@ -427,10 +465,14 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        if ADMIN_ID:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_text,
+                reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Errore nell'invio della notifica admin: {e}")
     
     await update.message.reply_text(
         "📬 Richiesta inviata all'amministratore!\n\n"
@@ -475,10 +517,14 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ]
     
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=admin_text,
-        reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        if ADMIN_ID:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=admin_text,
+                reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Errore nell'invio della notifica admin: {e}")
     
     await query.edit_message_text(
         "📬 Richiesta di cancellazione inviata all'amministratore!\n"
@@ -554,7 +600,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             cur.execute(
                 "UPDATE lists SET status = 'active', expiration = ? WHERE name = ?",
-                (exp_str, list_name)
+                (极str, list_name)
             )
             user_msg = f"✅ Rinnovo lista '{list_name}' completato!"
             
@@ -581,7 +627,11 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         
         # Notifica utente
-        await context.bot.send_message(chat_id=user_id, text=user_msg)
+        try:
+            await context.bot.send_message(chat_id=user_id, text=user_msg)
+        except Exception as e:
+            logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
+        
         await query.edit_message_text(f"✅ Richiesta #{req_id} approvata")
     
     elif data == "reject":
@@ -594,7 +644,11 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         if action in ["create", "renew"] and mesi and costo_totale:
             user_msg += f"\nAzione: {action.capitalize()} ({mesi} mesi)"
         
-        await context.bot.send_message(chat_id=user_id, text=user_msg)
+        try:
+            await context.bot.send_message(chat_id=user_id, text=user_msg)
+        except Exception as e:
+            logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
+        
         await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")
     
     conn.commit()
@@ -623,12 +677,17 @@ async def verify_ownership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     req_id, list_name, user_id, action, mesi, costo_totale, status, created_at = req
     
     # Messaggio all'utente
-    await context.bot.send_message(
-        chat_id=user极,
-        text=f"🔒 Verifica proprietà lista '{list_name}'\n\n"
-             "Per favore conferma di essere il proprietario di questa lista "
-             "rispondendo SI oppure NO:"
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"🔒 Verifica proprietà lista '{list_name}'\n\n"
+                 "Per favore conferma di essere il proprietario di questa lista "
+                 "rispondendo SI oppure NO:"
+        )
+    except Exception as e:
+        logger.error(f"Errore nell'invio del messaggio di verifica: {e}")
+        await query.edit_message_text(f"❌ Impossibile inviare messaggio a {user_id}")
+        return
     
     # Salva stato per gestire la risposta
     context.user_data["verify_req"] = req_id
@@ -660,10 +719,14 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         # Notifica admin
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"✅ Utente {user_id} ha confermato la proprietà della lista '{list_name}'"
-        )
+        try:
+            if ADMIN_ID:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"✅ Utente {user_id} ha confermato la proprietà della lista '{list_name}'"
+                )
+        except Exception as e:
+            logger.error(f"Errore nell'invio della notifica admin: {e}")
         
         await update.message.reply_text("✅ Verifica completata! La tua richiesta è in fase di approvazione.")
     else:
@@ -674,10 +737,14 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         
         await update.message.reply_text("❌ Richiesta annullata")
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"❌ Utente {user_id} ha NEGATO la proprietà della lista '{list_name}'"
-        )
+        try:
+            if ADMIN_ID:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"❌ Utente {user_id} ha NEGATO la proprietà della lista '{list_name}'"
+                )
+        except Exception as e:
+            logger.error(f"Errore nell'invio della notifica admin: {e}")
     
     # Pulisci dati temporanei
     del context.user_data["verify_req"]
@@ -689,82 +756,87 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # Sistema di reminder
 async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    now = datetime.now(timezone.utc)
-    
-    # Trova liste in scadenza (entro 7 giorni)
-    cur.execute("""
-        SELECT id, name, owner_id, expiration, last_reminder 
-        FROM lists 
-        WHERE status = 'active'
-        AND expiration IS NOT NULL
-        AND expiration > ?
-    """, (now.strftime("%Y-%m-%d %H:%M:%S"),))
-    
-    active_lists = cur.fetchall()
-    
-    for lista in active_lists:
-        list_id, list_name, owner_id, exp_str, last_reminder_str = lista
-        exp_date = datetime.fromisoformat(exp_str)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        now = datetime.now(timezone.utc)
         
-        # Calcola giorni rimanenti
-        days_left = (exp_date - now).days
+        # Trova liste in scadenza (entro 7 giorni)
+        cur.execute("""
+            SELECT id, name, owner_id, expiration, last_reminder 
+            FROM lists 
+            WHERE status = 'active'
+            AND expiration IS NOT NULL
+            AND expiration > ?
+        """, (now.strftime("%Y-%m-%d %H:%M:%S"),))
         
-        # Determina quando inviare i reminder
-        reminder_days = [7, 3, 1, 0]
+        active_lists = cur.fetchall()
         
-        if days_left in reminder_days:
-            # Controlla se abbiamo già inviato un reminder oggi
-            last_reminder = datetime.fromisoformat(last_reminder_str) if last_reminder_str else None
+        for lista in active_lists:
+            list_id, list_name, owner_id, exp_str, last_reminder_str = lista
+            exp_date = datetime.fromisoformat(exp_str)
             
-            if last_reminder and (now - last_reminder).days < 1:
-                continue  # Salta se abbiamo già inviato un reminder oggi
+            # Calcola giorni rimanenti
+            days_left = (exp_date - now).days
             
-            # Messaggio per l'utente
-            if days_left > 0:
-                user_msg = (
-                    f"⏰ PROMEMORIA RINNOVO LISTA\n\n"
-                    f"La tua lista '{list_name}' scadrà tra {days_left} giorni!\n"
-                    f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\n\n"
-                    f"💳 Costo rinnovo: €{COSTO_MENSILE} al mese\n"
-                    f"Per rinnovare, usa il comando /manage"
+            # Determina quando inviare i reminder
+            reminder_days = [7, 3, 1, 0]
+            
+            if days_left in reminder_days:
+                # Controlla se abbiamo già inviato un reminder oggi
+                last_reminder = datetime.fromisoformat(last_reminder_str) if last_reminder_str else None
+                
+                if last_reminder and (now - last_reminder).days < 1:
+                    continue  # Salta se abbiamo già inviato un reminder oggi
+                
+                # Messaggio per l'utente
+                if days_left > 0:
+                    user_msg = (
+                        f"⏰ PROMEMORIA RINNOVO LISTA\n\n"
+                        f"La tua lista '{list_name}' scadrà tra {days_left} giorni!\n"
+                        f"📆 Data scadenza: {exp_date.strftime('%d/%m/%Y')}\n\n"
+                        f"💳 Costo rinnovo: €{COSTO_MENSILE} al mese\n"
+                        f"Per rinnovare, usa il comando /manage"
+                    )
+                else:
+                    user_msg = (
+                        f"⚠️ URGENTE! LISTA SCADUTA\n\n"
+                        f"La tua lista '{list_name}' è scaduta oggi!\n\n"
+                        f"Per evitare la disattivazione, rinnova subito con /manage"
+                    )
+                
+                try:
+                    await context.bot.send_message(chat_id=owner_id, text=user_msg)
+                except Exception as e:
+                    logger.error(f"Errore invio reminder a {owner_id}: {e}")
+                
+                # Messaggio per l'admin
+                admin_msg = (
+                    f"🔔 PROMEMORIA SCADENZA LISTA\n\n"
+                    f"Lista: {list_name}\n"
+                    f"Proprietario: {owner_id}\n"
+                    f"Scadenza: {exp_date.strftime('%d/%m/%Y')}\n"
+                    f"Giorni rimasti: {days_left}\n\n"
+                    f"Stato: {'ATTIVA' if days_left > 0 else 'SCADUTA'}"
                 )
-            else:
-                user_msg = (
-                    f"⚠️ URGENTE! LISTA SCADUTA\n\n"
-                    f"La tua lista '{list_name}' è scaduta oggi!\n\n"
-                    f"Per evitare la disattivazione, rinnova subito con /manage"
+                
+                try:
+                    if ADMIN_ID:
+                        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg)
+                except Exception as e:
+                    logger.error(f"Errore invio reminder ad admin: {e}")
+                
+                # Aggiorna l'ultimo reminder
+                cur.execute(
+                    "UPDATE lists SET last_reminder = ? WHERE id = ?",
+                    (now.strftime("%Y-%m-%d %H:%M:%S"), list_id)
                 )
-            
-            try:
-                await context.bot.send_message(chat_id=owner_id, text=user_msg)
-            except Exception as e:
-                logger.error(f"Errore invio reminder a {owner_id}: {e}")
-            
-            # Messaggio per l'admin
-            admin_msg = (
-                f"🔔 PROMEMORIA SCADENZA LISTA\n\n"
-                f"Lista: {list_name}\n"
-                f"Proprietario: {owner_id}\n"
-                f"Scadenza: {exp_date.strftime('%d/%m/%Y')}\n"
-                f"Giorni rimasti: {days_left}\n\n"
-                f"Stato: {'ATTIVA' if days_left > 0 else 'SCADUTA'}"
-            )
-            
-            try:
-                await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg)
-            except Exception as e:
-                logger.error(f"Errore invio reminder ad admin: {e}")
-            
-            # Aggiorna l'ultimo reminder
-            cur.execute(
-                "UPDATE lists SET last_reminder = ? WHERE id = ?",
-                (now.strftime("%Y-%m-%d %H:%M:%S"), list_id)
-            )
-    
-    conn.commit()
-    conn.close()
+        
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Errore nel controllo delle scadenze: {e}")
+    finally:
+        conn.close()
 
 # Comando admin per forzare il controllo
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -813,10 +885,17 @@ def main():
     # Crea l'applicazione Telegram
     application = Application.builder().token(TOKEN).build()
     
-    # Aggiungi job per i reminder
-    job_queue = application.job_queue
-    job_queue.run_repeating(check_expirations, interval=86400, first=10)  # Ogni 24 ore
-
+    # Registra il gestore di errori
+    application.add_error_handler(error_handler)
+    
+    # Aggiungi job per i reminder se disponibile
+    if application.job_queue:
+        job_queue = application.job_queue
+        job_queue.run_repeating(check_expirations, interval=86400, first=10)  # Ogni 24 ore
+        logger.info("JobQueue abilitata per i promemoria")
+    else:
+        logger.warning("JobQueue non disponibile. I promemoria automatici saranno disabilitati.")
+    
     # Handler conversazione gestione liste
     list_handler = ConversationHandler(
         entry_points=[CommandHandler("manage", manage_list)],
@@ -868,6 +947,7 @@ def main():
     ))
 
     # Avvia il bot
+    logger.info("🤖 Bot in avvio...")
     application.run_polling()
 
 if __name__ == "__main__":
