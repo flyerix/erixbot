@@ -204,7 +204,7 @@ async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REPORT_LIST
 
 # Gestione nome lista per segnalazione
-async def handle_report_list(update: Update, context: ContextTypes极DEFAULT_TYPE):
+async def handle_report_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["report_list"] = list_name
     
