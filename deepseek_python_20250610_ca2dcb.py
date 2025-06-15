@@ -49,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Abilita debug per le connessioni
-logging.getLogger("httpx").set极Level(logging.DEBUG)
+logging.getLogger("httpx").setLevel(logging.DEBUG)
 
 # Server web per Render
 app = Flask(__name__)
