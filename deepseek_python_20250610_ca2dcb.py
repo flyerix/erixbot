@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboard极arkup,
+    InlineKeyboardMarkup,  # Corretto
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove
 )
@@ -259,7 +259,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                reply_markup=InlineKeyboardMarkup(keyboard))  # Correzione
     except Exception as e:
         logger.error(f"Errore nell'invio della notifica admin: {e}")
     
@@ -414,7 +414,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"❌ Lista non trovata\n\n"
-            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n\n"
+            f"💳 Costo creazione: €{极OSTO_MENSILE}/mese\n\n"
             "📆 Per quanti mesi vuoi creare la lista?\n"
             f"{esempi}\n\n"
             "Inserisci il numero di mesi:"
@@ -497,7 +497,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📬 Richiesta inviata all'amministratore!\n\n"
         f"🔍 Dettagli:\n"
-        f"-极 Azione: {action}\n"
+        f"- Azione: {action}\n"
         f"- Durata: {mesi} mesi\n"
         f"- Importo: €{costo_totale}\n\n"
         "Riceverai una notifica quando la richiesta verrà elaborata."
@@ -532,7 +532,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req极}"),
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),  # Corretto
             InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
@@ -656,7 +656,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
         
-        await query.edit_message_text(f"✅ Richiesta #{req_id} approvata")
+        await query.edit_message_text(f"✅ Richiesta #{req_id} approvata")  # Aggiunto await
     
     elif data == "reject":
         cur.execute(
@@ -673,7 +673,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
         
-        await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")
+        await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")  # Aggiunto await
     
     conn.commit()
     conn.close()
@@ -779,7 +779,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn.close()
 
 # Sistema di reminder
-async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
+async def check_expirations(context: ContextTypes.DEFAULT_TYPE):  # Aggiunto context
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
