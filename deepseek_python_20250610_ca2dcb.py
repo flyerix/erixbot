@@ -24,7 +24,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ConversationHandler,
-    CallbackQueryHandler,
+    Callback极Handler,
     JobQueue
 )
 from telegram.request import HTTPXRequest
@@ -96,7 +96,7 @@ def init_db():
         months INTEGER,
         total_cost REAL,
         status TEXT DEFAULT 'pending',
-极       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     
@@ -128,7 +128,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Costruisci il messaggio di errore
     error_message = (
-        f"🚨 ERRORE CRITICO NEL BOT 🚨\极n\n"
+        f"🚨 ERRORE CRITICO NEL BOT 🚨\n\n"
         f"• Eccezione: {type(context.error).__name__}\n"
         f"• Messaggio: {context.error}\n\n"
         f"Traceback completo:\n<pre>{html.escape(tb_string)}</pre>"
@@ -243,7 +243,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     admin_text = (
         f"🚨 NUOVA SEGNALAZIONE PROBLEMA 🚨\n\n"
         f"• Lista: {list_name}\n"
-        f"• Utente: {user_id}\n"
+        f"• Utente: {user极}\n"
         f"• Dettagli:\n{problem_details}"
     )
     
@@ -274,7 +274,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(
         "📬 Segnalazione inviata all'amministratore!\n\n"
         "Riceverai una risposta al più presto.\n\n"
-        "Grazie per la tua pazienza!",
+极       "Grazie per la tua pazienza!",
         reply_markup=reply_markup
     )
     return ConversationHandler.END
@@ -384,7 +384,11 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Controlla se la lista è scaduta
         now = datetime.now(timezone.utc)
-        exp_date = datetime.fromisoformat(lista[5]) if lista[5] else now
+        exp_str = lista[5]
+        exp_date = datetime.fromisoformat(exp_str) if exp_str else now
+        if exp_date.tzinfo is None:  # Se è naive
+            exp_date = exp_date.replace(tzinfo=timezone.utc)  # Rendi aware
+        
         days_left = (exp_date - now).days if exp_date > now else 0
         
         status = "✅ Attiva" if lista[3] == 'active' else "❌ Scaduta"
@@ -392,7 +396,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ Lista trovata!\n"
             f"📌 Stato: {status}\n"
-            f"📆 Scadenza: {exp_date.strftime('%d/%m/%Y') if lista[5] else 'Non impostata'}\n"
+            f"📆 Scadenza: {exp_date.strftime('%d/%m/%Y') if exp_str else 'Non impostata'}\n"
             f"⏳ Giorni rimasti: {days_left if days_left > 0 else 0}\n\n"
             f"💳 Costo rinnovo: €{COSTO_MENSILE}/mese\n"
             "Scegli un'azione:",
@@ -410,7 +414,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"❌ Lista non trovata\n\n"
-            f"💳 Costo creazione: €{极OSTO_MENSILE}/mese\n\n"
+            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n\n"
             "📆 Per quanti mesi vuoi creare la lista?\n"
             f"{esempi}\n\n"
             "Inserisci il numero di mesi:"
@@ -594,7 +598,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         if action == "create":
             # Calcola la data di scadenza
             exp_date = datetime.now(timezone.utc) + timedelta(days=mesi*30)
-            exp_str = exp_date.strftime("%Y-%m-%d %H:%M:%S")
+            exp_str = exp_date.isoformat()  # Usa ISO format per conservare il timezone
             
             cur.execute(
                 "INSERT INTO lists (name, owner_id, expiration) VALUES (?, ?, ?)",
@@ -608,11 +612,15 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             current_exp = cur.fetchone()
             
             if current_exp and current_exp[0]:
-                exp_date = datetime.fromisoformat(current_exp[0]) + timedelta(days=mesi*30)
+                # Converti la data dal database e gestisci il timezone
+                exp_date = datetime.fromisoformat(current_exp[0])
+                if exp_date.tzinfo is None:
+                    exp_date = exp_date.replace(tzinfo=timezone.utc)
+                exp_date = exp_date + timedelta(days=mesi*30)
             else:
                 exp_date = datetime.now(timezone.utc) + timedelta(days=mesi*30)
                 
-            exp_str = exp_date.strftime("%Y-%m-%d %H:%M:%S")
+            exp_str = exp_date.isoformat()  # Usa ISO format per conservare il timezone
             
             cur.execute(
                 "UPDATE lists SET status = 'active', expiration = ? WHERE name = ?",
@@ -775,7 +783,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)  # Data aware (con fuso orario)
         
         # Trova liste in scadenza (entro 7 giorni)
         cur.execute("""
@@ -790,18 +798,27 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
         
         for lista in active_lists:
             list_id, list_name, owner_id, exp_str, last_reminder_str = lista
-            exp_date = datetime.fromisoformat(exp_str)
             
-            # Calcola giorni rimanenti
+            # Converti la stringa in datetime e rendila aware
+            exp_date = datetime.fromisoformat(exp_str)
+            if exp_date.tzinfo is None:  # Se è naive
+                exp_date = exp_date.replace(tzinfo=timezone.utc)  # Rendi aware
+            
+            # Calcola giorni rimanenti correttamente (entrambe aware)
             days_left = (exp_date - now).days
             
             # Determina quando inviare i reminder
             reminder_days = [7, 3, 1, 0]
             
             if days_left in reminder_days:
-                # Controlla se abbiamo già inviato un reminder oggi
-                last_reminder = datetime.fromisoformat(last_reminder_str) if last_reminder_str else None
+                # Gestisci last_reminder (può essere NULL)
+                last_reminder = None
+                if last_reminder_str:
+                    last_reminder = datetime.fromisoformat(last_reminder_str)
+                    if last_reminder.tzinfo is None:  # Se è naive
+                        last_reminder = last_reminder.replace(tzinfo=timezone.utc)  # Rendi aware
                 
+                # Controlla se abbiamo già inviato un reminder oggi
                 if last_reminder and (now - last_reminder).days < 1:
                     continue  # Salta se abbiamo già inviato un reminder oggi
                 
@@ -842,10 +859,10 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Errore invio reminder ad admin: {e}")
                 
-                # Aggiorna l'ultimo reminder
+                # Aggiorna l'ultimo reminder (usa formato ISO per conservare il timezone)
                 cur.execute(
                     "UPDATE lists SET last_reminder = ? WHERE id = ?",
-                    (now.strftime("%Y-%m-%d %H:%M:%S"), list_id)
+                    (now.isoformat(), list_id)
                 )
         
         conn.commit()
