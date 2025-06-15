@@ -2,3 +2,4 @@ python-telegram-bot[webhooks]==20.6
 flask==3.0.3
 httpx==0.25.2
 httpcore==0.17.3
+sqlite3==0.0.1  # Solo per compatibilità, di solito incluso in Python
