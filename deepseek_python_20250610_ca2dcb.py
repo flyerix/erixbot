@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    InlineKeyboard极arkup,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove
 )
@@ -48,8 +48,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Abilita debug per le connessioni
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+# Imposta il logging per httpx a WARNING per ridurre il rumore
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Server web per Render
 app = Flask(__name__)
@@ -260,8 +260,6 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
                 chat_id=ADMIN_ID,
                 text=admin_text,
                 reply_markup=InlineKeyboardMarkup(keyboard)
-
-            )
     except Exception as e:
         logger.error(f"Errore nell'invio della notifica admin: {e}")
     
@@ -271,7 +269,6 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    # CORREZIONE: Rimosso carattere invisibile prima di "Grazie"
     await update.message.reply_text(
         "📬 Segnalazione inviata all'amministratore!\n\n"
         "Riceverai una risposta al più presto.\n\n"
@@ -315,11 +312,13 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
         
         await query.message.reply_text(
             f"✉️ Invia il messaggio per l'utente {user_id}:\n"
-            "(Scrivi /cancel per annullare)"
+            "(Scrivi /cancel per annullare)",
+            reply_markup=ReplyKeyboardRemove()
         )
     
     conn.commit()
     conn.close()
+    return ConversationHandler.END
 
 # Gestione risposta admin a segnalazione
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -371,7 +370,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["list_name"] = list_name
     
-    conn = sqlite3.connect(DB极_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT * FROM lists WHERE name = ?", (list_name,))
     lista = cur.fetchone()
@@ -498,7 +497,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📬 Richiesta inviata all'amministratore!\n\n"
         f"🔍 Dettagli:\n"
-        f"- Azione: {action}\n"
+        f"-极 Azione: {action}\n"
         f"- Durata: {mesi} mesi\n"
         f"- Importo: €{costo_totale}\n\n"
         "Riceverai una notifica quando la richiesta verrà elaborata."
@@ -533,7 +532,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req极}"),
             InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
@@ -893,12 +892,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "⚠️ Segnala Problema":
         return await start_report(update, context)
     else:
+        # Mostra la tastiera principale
+        keyboard = [
+            ["📋 Gestisci Lista", "ℹ️ FAQ"],
+            ["⚠️ Segnala Problema"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
         await update.message.reply_text(
-            "Non ho capito il comando. Usa la tastiera per selezionare un'opzione.",
-            reply_markup=ReplyKeyboardMarkup([
-                ["📋 Gestisci Lista", "ℹ️ FAQ"],
-                ["⚠️ Segnala Problema"]
-            ], resize_keyboard=True)
+            "Non ho capito il comando. Usa la tastiera per selezionare un'opzione:",
+            reply_markup=reply_markup
         )
 
 # Processa aggiornamenti da webhook
@@ -971,12 +974,12 @@ def setup_handlers(application):
     list_handler = ConversationHandler(
         entry_points=[CommandHandler("manage", manage_list)],
         states={
-            LIST_NAME: [MessageHandler(filters.TEXT, handle_list_name)],
+            LIST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_list_name)],
             ACTION_EXISTING: [
                 CallbackQueryHandler(ask_duration, pattern="^renew$"),
                 CallbackQueryHandler(handle_cancel, pattern="^cancel$")
             ],
-            DURATION: [MessageHandler(filters.TEXT, handle_duration)]
+            DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_duration)]
         },
         fallbacks=[CommandHandler("cancel", start)],
         map_to_parent={ConversationHandler.END: ConversationHandler.END}
@@ -984,30 +987,33 @@ def setup_handlers(application):
 
     # Handler conversazione segnalazione problemi
     report_handler = ConversationHandler(
-        entry_points=[CommandHandler("report", start_report)],
+        entry_points=[
+            CommandHandler("report", start_report),
+            MessageHandler(filters.Regex(r'^⚠️ Segnala Problema$'), start_report)
+        ],
         states={
-            REPORT_LIST: [MessageHandler(filters.TEXT, handle_report_list)],
-            REPORT_DETAILS: [MessageHandler(filters.TEXT, handle_report_details)]
+            REPORT_LIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_report_list)],
+            REPORT_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_report_details)]
         },
-        fallbacks=[CommandHandler("cancel", start)],
-        map_to_parent={ConversationHandler.END: ConversationHandler.END}
+        fallbacks=[CommandHandler("cancel", start)]
     )
 
     # Registra handler
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("faq", faq))
     application.add_handler(CommandHandler("check_expirations", force_check))
-    application.add_handler(CallbackQueryHandler(handle_admin_action, pattern="^(approve|reject)_"))
-    application.add_handler(CallbackQueryHandler(handle_report_action, pattern="^(resolve|contact)_"))
+    application.add_handler(CallbackQueryHandler(handle_admin_action, pattern=r"^(approve|reject)_"))
+    application.add_handler(CallbackQueryHandler(handle_report_action, pattern=r"^(resolve|contact)_"))
     # Aggiungi handler per la verifica
-    application.add_handler(CallbackQueryHandler(verify_ownership, pattern="^verify_"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(verify_ownership, pattern=r"^verify_"))
+    
+    # Aggiungi prima le conversazioni
     application.add_handler(list_handler)
     application.add_handler(report_handler)
     
     # Handler per risposte admin
     application.add_handler(MessageHandler(
-        filters.TEXT & filters.Chat(chat_id=ADMIN_ID),
+        filters.TEXT & filters.Chat(chat_id=ADMIN_ID) & ~filters.COMMAND,
         handle_admin_reply
     ))
     
@@ -1015,6 +1021,12 @@ def setup_handlers(application):
     application.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_verification
+    ))
+    
+    # Handler generico per messaggi di testo (aggiunto per ultimo)
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_message
     ))
 
 # Main
