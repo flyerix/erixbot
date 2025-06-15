@@ -7,6 +7,8 @@ import html
 import traceback
 import signal
 import httpx
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
@@ -104,7 +106,7 @@ def init_db():
         list_name TEXT,
         user_id INTEGER,
         problem_details TEXT,
-        status极 TEXT DEFAULT 'pending',
+        status TEXT DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -499,7 +501,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback极
+    query = update.callback_query
     await query.answer()
     
     list_name = context.user_data["list_name"]
@@ -906,18 +908,46 @@ async def process_update(update_data):
     # Chiudi l'applicazione
     await application.shutdown()
 
+# Sistema di fallback per i reminder
+def run_reminder_thread():
+    """Esegue il controllo scadenze in un thread separato"""
+    logger.info("🔄 Avvio thread di reminder fallback")
+    while True:
+        try:
+            # Crea un'applicazione temporanea
+            temp_app = Application.builder().token(TOKEN).build()
+            
+            # Esegui il controllo sincrono
+            asyncio.run(check_expirations(temp_app))
+            
+            # Attendi 24 ore
+            time.sleep(86400)
+        except Exception as e:
+            logger.error(f"Errore nel thread di reminder: {e}")
+            time.sleep(3600)  # Riprova dopo 1 ora in caso di errore
+
+# Funzione per avviare il sistema di reminder
+def start_reminder_job(application):
+    """Avvia il job di controllo scadenze"""
+    try:
+        if application.job_queue:
+            application.job_queue.run_repeating(
+                check_expirations, 
+                interval=86400,  # Ogni 24 ore
+                first=10
+            )
+            logger.info("✅ JobQueue abilitata per i promemoria")
+        else:
+            # Soluzione alternativa se JobQueue non disponibile
+            logger.warning("⚠️ JobQueue non disponibile, avvio thread separato per promemoria")
+            threading.Thread(target=run_reminder_thread, daemon=True).start()
+    except Exception as e:
+        logger.error(f"Errore nell'avvio del job di reminder: {e}")
+
 # Setup degli handler
 def setup_handlers(application):
     # Registra il gestore di errori
     application.add_error_handler(error_handler)
-    
-    # Aggiungi job per i reminder se disponibile
-    if application.job_queue:
-        job_queue = application.job_queue
-        job_queue.run_repeating(check_expirations, interval=86400, first=10)  # Ogni 24 ore
-        logger.info("JobQueue abilitata per i promemoria")
-    else:
-        logger.warning("JobQueue non disponibile. I promemoria automatici saranno disabilitati.")
     
     # Handler conversazione gestione liste
     list_handler = ConversationHandler(
@@ -926,7 +956,7 @@ def setup_handlers(application):
             LIST_NAME: [MessageHandler(filters.TEXT, handle_list_name)],
             ACTION_EXISTING: [
                 CallbackQueryHandler(ask_duration, pattern="^renew$"),
-                CallbackQueryHandler(handle_cancel, pattern="^cancel$")
+                Call极backQueryHandler(handle_cancel, pattern="^cancel$")
             ],
             DURATION: [MessageHandler(filters.TEXT, handle_duration)]
         },
@@ -998,6 +1028,9 @@ def main():
     # Setup degli handler
     setup_handlers(application)
     
+    # Avvia il sistema di reminder
+    start_reminder_job(application)
+    
     # Avvia il bot in modalità webhook
     logger.info(f"🤖 Configurazione webhook su: {webhook_url}")
     
@@ -1026,19 +1059,16 @@ def main():
     loop = asyncio.get_event_loop()
     loop.create_task(on_startup())
     
-    # Avvia il server Flask solo se non siamo su Render
-    if not os.getenv("RENDER"):
+    # AVVIO PER RENDER (utilizzando Flask + Gunicorn)
+    if os.getenv("RENDER"):
+        logger.info("🚀 Modalità Render: Gunicorn gestirà l'app Flask")
+        # Non avviare nulla qui, Gunicorn gestirà Flask
+    else:
+        # Avvio locale
         port = int(os.environ.get("PORT", 8080))
         app.run(host='0.0.0.0', port=port)
-    else:
-        # Su Render, usa Gunicorn per avviare l'app
-        logger.info("🚀 Applicazione pronta per essere avviata da Gunicorn")
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.environ.get("PORT", 8080)),
-            webhook_url=webhook_url,
-            secret_token=WEBHOOK_SECRET
-        )
 
 if __name__ == "__main__":
-    main()
+    # Su Render non eseguire main() direttamente
+    if not os.getenv("RENDER"):
+        main()
