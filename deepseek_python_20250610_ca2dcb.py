@@ -640,7 +640,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Aggiorna stato richiesta
         cur.execute(
             "UPDATE requests SET status = 'approved' WHERE id = ?",
-            (req_id,)
+            (极id,)
         )
         
         # Aggiungi dettagli pagamento se applicabile
@@ -734,7 +734,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     req_id = context.user_data["verify_req"]
     list_name = context.user_data["verify_list"]
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite极.connect(DB_PATH)
     cur = conn.cursor()
     
     if text == "si":
@@ -895,22 +895,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Processa aggiornamenti da webhook
 async def process_update(update_data):
-    async with Application.builder() \
-            .token(TOKEN) \
-            .request(HTTPXRequest(
-                connect_timeout=30.0,
-                read_timeout=30.0,
-                write_timeout=30.0,
-                pool_timeout=30.0
-            )) \
-            .build() as application:
-        
-        # Registra handler (stesso setup di main)
-        setup_handlers(application)
-        
-        # Processa l'aggiornamento
-        update = Update.de_json(update_data, application.bot)
-        await application.process_update(update)
+    application = Application.builder() \
+        .token(TOKEN) \
+        .request(HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            pool_timeout=30.0
+        )) \
+        .build()
+    
+    # Setup degli handler
+    setup_handlers(application)
+    
+    # Inizializza l'applicazione
+    await application.initialize()
+    
+    # Processa l'aggiornamento
+    update = Update.de_json(update_data, application.bot)
+    await application.process_update(update)
+    
+    # Chiudi l'applicazione
+    await application.shutdown()
 
 # Setup degli handler
 def setup_handlers(application):
@@ -1010,7 +1016,8 @@ def main():
     # Avvia il bot in modalità webhook
     logger.info(f"🤖 Configurazione webhook su: {webhook_url}")
     
-    async def post_init(application):
+    # Configura il webhook all'avvio
+    async def on_startup():
         await application.bot.set_webhook(
             webhook_url,
             secret_token=WEBHOOK_SECRET,
@@ -1029,12 +1036,15 @@ def main():
     
     # Avvia il bot
     logger.info("🤖 Bot in avvio...")
+    
+    # Avvia l'applicazione in modo asincrono
+    loop = asyncio.get_event_loop()
+    loop.create_task(on_startup())
     application.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8080)),
         webhook_url=webhook_url,
-        secret_token=WEBHOOK_SECRET,
-        post_init=post_init
+        secret_token=WEBHOOK_SECRET
     )
 
 if __name__ == "__main__":
