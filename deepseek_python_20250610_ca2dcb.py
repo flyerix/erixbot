@@ -5,6 +5,8 @@ import pathlib
 import asyncio
 import html
 import traceback
+import signal
+import httpx
 from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
@@ -23,30 +25,48 @@ from telegram.ext import (
     CallbackQueryHandler,
     JobQueue
 )
-from flask import Flask
+from telegram.request import HTTPXRequest
+from flask import Flask, request, jsonify
 from threading import Thread
+import httpcore
 
-# Configurazione
+# Configurazione avanzata
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))  # Fallback per sviluppo
+ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 DB_NAME = "database.db"
 COSTO_MENSILE = 15  # €15 al mese
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "default-secret-token")
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "https://your-render-app.onrender.com")
 
 # Percorso assoluto per il database
 DB_PATH = os.path.join(pathlib.Path(__file__).parent.resolve(), DB_NAME)
 
+# Configurazione logging avanzata
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Abilita debug per le connessioni
+logging.getLogger("httpx").setLevel(logging.DEBUG)
+logging.getLogger("httpcore").setLevel(logging.DEBUG)
+
 # Server web per Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Bot Telegram is running and ready!"
+    return "🤖 Bot Telegram is running and ready!", 200, {'Connection': 'keep-alive'}
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+        return jsonify({"status": "unauthorized"}), 403
+        
+    json_data = request.get_json()
+    asyncio.run(process_update(json_data))
+    return jsonify({"status": "ok"}), 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -79,7 +99,7 @@ def init_db():
     
     cur.execute("""
     CREATE TABLE IF NOT EXISTS requests (
-        id INTEGER PRIMARY极,
+        id INTEGER PRIMARY KEY,
         list_name TEXT,
         user_id INTEGER,
         action TEXT,
@@ -107,6 +127,10 @@ def init_db():
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Gestore globale degli errori."""
     logger.error("⚠️⚠️⚠️ ECCEZIONE NON GESTITA ⚠️⚠️⚠️", exc_info=context.error)
+    
+    # Rileva timeout specifici
+    if isinstance(context.error, (httpx.ConnectTimeout, httpcore.ConnectTimeout)):
+        logger.warning("Timeout di connessione rilevato, verificare la rete")
     
     # Prepara il traceback
     tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
@@ -602,7 +626,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             
             cur.execute(
                 "UPDATE lists SET status = 'active', expiration = ? WHERE name = ?",
-                (极str, list_name)
+                (exp_str, list_name)
             )
             user_msg = f"✅ Rinnovo lista '{list_name}' completato!"
             
@@ -869,24 +893,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], resize_keyboard=True)
         )
 
-# Main
-def main():
-    # Avvia il server web per Render
-    start_web_server()
-    
-    # Inizializza il database
-    init_db()
-    
-    # Verifica configurazione
-    if not TOKEN:
-        logger.error("❌ TOKEN non configurato!")
-        return
-    if ADMIN_ID == 0:
-        logger.warning("⚠️ ADMIN_CHAT_ID non configurato, funzionalità admin limitate")
-    
-    # Crea l'applicazione Telegram
-    application = Application.builder().token(TOKEN).build()
-    
+# Processa aggiornamenti da webhook
+async def process_update(update_data):
+    async with Application.builder() \
+            .token(TOKEN) \
+            .request(HTTPXRequest(
+                connect_timeout=30.0,
+                read_timeout=30.0,
+                write_timeout=30.0,
+                pool_timeout=30.0
+            )) \
+            .build() as application:
+        
+        # Registra handler (stesso setup di main)
+        setup_handlers(application)
+        
+        # Processa l'aggiornamento
+        update = Update.de_json(update_data, application.bot)
+        await application.process_update(update)
+
+# Setup degli handler
+def setup_handlers(application):
     # Registra il gestore di errori
     application.add_error_handler(error_handler)
     
@@ -948,9 +975,67 @@ def main():
         handle_verification
     ))
 
+# Main
+def main():
+    # Avvia il server web per Render
+    start_web_server()
+    
+    # Inizializza il database
+    init_db()
+    
+    # Verifica configurazione
+    if not TOKEN:
+        logger.error("❌ TOKEN non configurato!")
+        return
+    if ADMIN_ID == 0:
+        logger.warning("⚠️ ADMIN_CHAT_ID non configurato, funzionalità admin limitate")
+    
+    # Configurazione webhook
+    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+    
+    # Configura l'applicazione con timeout estesi
+    application = Application.builder() \
+        .token(TOKEN) \
+        .request(HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            pool_timeout=30.0
+        )) \
+        .build()
+    
+    # Setup degli handler
+    setup_handlers(application)
+    
+    # Avvia il bot in modalità webhook
+    logger.info(f"🤖 Configurazione webhook su: {webhook_url}")
+    
+    async def post_init(application):
+        await application.bot.set_webhook(
+            webhook_url,
+            secret_token=WEBHOOK_SECRET,
+            drop_pending_updates=True
+        )
+        logger.info("✅ Webhook configurato con successo")
+    
+    # Configura shutdown graceful
+    loop = asyncio.get_event_loop()
+    
+    for signame in ('SIGINT', 'SIGTERM'):
+        loop.add_signal_handler(
+            getattr(signal, signame),
+            lambda: asyncio.create_task(application.stop())
+        )
+    
     # Avvia il bot
     logger.info("🤖 Bot in avvio...")
-    application.run_polling()
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 8080)),
+        webhook_url=webhook_url,
+        secret_token=WEBHOOK_SECRET,
+        post_init=post_init
+    )
 
 if __name__ == "__main__":
     main()
