@@ -608,7 +608,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             if current_exp and current_exp[0]:
                 exp_date = datetime.fromisoformat(current_exp[0]) + timedelta(days=mesi*30)
             else:
-                exp_date = datetime.now(timezone.utc) + timedelta(days mesi*30)
+                exp_date = datetime.now(timezone.utc) + timedelta(days=mesi*30)
                 
             exp_str = exp_date.strftime("%Y-%m-%d %H:%M:%S")
             
