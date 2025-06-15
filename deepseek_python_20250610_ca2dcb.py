@@ -28,7 +28,6 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 from flask import Flask, request, jsonify
 from threading import Thread
-import httpcore
 
 # Configurazione avanzata
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -50,7 +49,6 @@ logger = logging.getLogger(__name__)
 
 # Abilita debug per le connessioni
 logging.getLogger("httpx").setLevel(logging.DEBUG)
-logging.getLogger("httpcore").setLevel(logging.DEBUG)
 
 # Server web per Render
 app = Flask(__name__)
@@ -61,7 +59,7 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+    if request.headers.get('X-Telegram-Bot-Api-Secret极ken') != WEBHOOK_SECRET:
         return jsonify({"status": "unauthorized"}), 403
         
     json_data = request.get_json()
@@ -117,7 +115,7 @@ def init_db():
         user_id INTEGER,
         problem_details TEXT,
         status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT极ESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     conn.commit()
@@ -129,7 +127,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error("⚠️⚠️⚠️ ECCEZIONE NON GESTITA ⚠️⚠️⚠️", exc_info=context.error)
     
     # Rileva timeout specifici
-    if isinstance(context.error, (httpx.ConnectTimeout, httpcore.ConnectTimeout)):
+    if isinstance(context.error, httpx.ConnectTimeout):
         logger.warning("Timeout di connessione rilevato, verificare la rete")
     
     # Prepara il traceback
@@ -335,7 +333,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.effective_user.id != ADMIN_ID:
         return
     
-    if "contact_user" not in context.user_data:
+    if "contact_user" not in context.user极ta:
         return
     
     user_id = context.user_data["contact_user"]
@@ -593,7 +591,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(
                 f"⚠️ ATTENZIONE: La lista '{list_name}' è già registrata a nome di un altro utente!\n\n"
                 f"Proprietario attuale: {existing_list[0]}\n"
-                f"Richiedente: {user_id}\n"
+                f"Richiedente: {user_id}\极"
                 "Premi il pulsante per avviare la verifica della proprietà:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -748,7 +746,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             if ADMIN_ID:
                 await context.bot.send_message(
-                    chat_id=ADMIN极D,
+                    chat_id=ADMIN_ID,
                     text=f"✅ Utente {user_id} ha confermato la proprietà della lista '{list_name}'"
                 )
         except Exception as e:
