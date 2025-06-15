@@ -27,7 +27,6 @@ from telegram.ext import (
 )
 from telegram.request import HTTPXRequest
 from flask import Flask, request, jsonify
-from threading import Thread
 
 # Configurazione avanzata
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -59,21 +58,12 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('X-Telegram-Bot-Api-Secret极ken') != WEBHOOK_SECRET:
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
         return jsonify({"status": "unauthorized"}), 403
         
     json_data = request.get_json()
     asyncio.run(process_update(json_data))
     return jsonify({"status": "ok"}), 200
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def start_web_server():
-    t = Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
 
 # Stati conversazione
 LIST_NAME, ACTION_EXISTING, ACTION_NEW, DURATION, REPORT_LIST, REPORT_DETAILS = range(6)
@@ -114,7 +104,7 @@ def init_db():
         list_name TEXT,
         user_id INTEGER,
         problem_details TEXT,
-        status TEXT DEFAULT 'pending',
+        status极 TEXT DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -214,7 +204,7 @@ async def start_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REPORT_LIST
 
 # Gestione nome lista per segnalazione
-async def handle_report_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_report_list(update: Update, context: ContextTypes极DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["report_list"] = list_name
     
@@ -333,7 +323,7 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.effective_user.id != ADMIN_ID:
         return
     
-    if "contact_user" not in context.user极ta:
+    if "contact_user" not in context.user_data:
         return
     
     user_id = context.user_data["contact_user"]
@@ -509,7 +499,7 @@ async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query = update.callback极
     await query.answer()
     
     list_name = context.user_data["list_name"]
@@ -591,7 +581,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.edit_message_text(
                 f"⚠️ ATTENZIONE: La lista '{list_name}' è già registrata a nome di un altro utente!\n\n"
                 f"Proprietario attuale: {existing_list[0]}\n"
-                f"Richiedente: {user_id}\极"
+                f"Richiedente: {user_id}\n"
                 "Premi il pulsante per avviare la verifica della proprietà:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -618,7 +608,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             if current_exp and current_exp[0]:
                 exp_date = datetime.fromisoformat(current_exp[0]) + timedelta(days=mesi*30)
             else:
-                exp_date = datetime.now(timezone.utc) + timedelta(days=mesi*30)
+                exp_date = datetime.now(timezone.utc) + timedelta(days极 mesi*30)
                 
             exp_str = exp_date.strftime("%Y-%m-%d %H:%M:%S")
             
@@ -981,9 +971,6 @@ def setup_handlers(application):
 
 # Main
 def main():
-    # Avvia il server web per Render
-    start_web_server()
-    
     # Inizializza il database
     init_db()
     
@@ -1038,12 +1025,20 @@ def main():
     # Avvia l'applicazione in modo asincrono
     loop = asyncio.get_event_loop()
     loop.create_task(on_startup())
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        webhook_url=webhook_url,
-        secret_token=WEBHOOK_SECRET
-    )
+    
+    # Avvia il server Flask solo se non siamo su Render
+    if not os.getenv("RENDER"):
+        port = int(os.environ.get("PORT", 8080))
+        app.run(host='0.0.0.0', port=port)
+    else:
+        # Su Render, usa Gunicorn per avviare l'app
+        logger.info("🚀 Applicazione pronta per essere avviata da Gunicorn")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get("PORT", 8080)),
+            webhook_url=webhook_url,
+            secret_token=WEBHOOK_SECRET
+        )
 
 if __name__ == "__main__":
     main()
