@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from telegram import (
     Update,
     InlineKeyboardButton,
-    InlineKeyboardMarkup,  # Corretto
+    InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove
 )
@@ -101,7 +101,7 @@ def init_db():
     """)
     
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS reports (
+    CREATE TABLE极 NOT EXISTS reports (
         id INTEGER PRIMARY KEY,
         list_name TEXT,
         user_id INTEGER,
@@ -259,7 +259,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
-                reply_markup=InlineKeyboardMarkup(keyboard))  # Correzione
+                reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
         logger.error(f"Errore nell'invio della notifica admin: {e}")
     
@@ -307,7 +307,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         
         # Salva l'ID per rispondere
-        context.user_data["contact_user"] = user_id
+        context.user_data["contact_user"] = user极
         context.user_data["report_id"] = report_id
         
         await query.message.reply_text(
@@ -369,7 +369,8 @@ async def manage_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["list_name"] = list_name
-    
+    user_id = update.message.from_user.id  # Ottieni l'ID dell'utente corrente
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT * FROM lists WHERE name = ?", (list_name,))
@@ -377,6 +378,21 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     if lista:
+        # Estrai i dati della lista
+        list_id = lista[0]
+        owner_id = lista[2]
+        status = lista[3]
+        exp_str = lista[5]
+
+        # VERIFICA SE L'UTENTE È IL PROPRIETARIO
+        if user_id != owner_id:
+            await update.message.reply_text(
+                "❌ Non sei il proprietario di questa lista. "
+                "Solo il proprietario può gestirla."
+            )
+            return ConversationHandler.END
+
+        # Se è il proprietario, procedi
         keyboard = [
             [InlineKeyboardButton("🔄 Rinnova", callback_data="renew")],
             [InlineKeyboardButton("🗑 Cancella", callback_data="cancel")]
@@ -384,14 +400,13 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Controlla se la lista è scaduta
         now = datetime.now(timezone.utc)
-        exp_str = lista[5]
         exp_date = datetime.fromisoformat(exp_str) if exp_str else now
         if exp_date.tzinfo is None:  # Se è naive
             exp_date = exp_date.replace(tzinfo=timezone.utc)  # Rendi aware
         
         days_left = (exp_date - now).days if exp_date > now else 0
         
-        status = "✅ Attiva" if lista[3] == 'active' else "❌ Scaduta"
+        status = "✅ Attiva" if status == 'active' else "❌ Scaduta"
         
         await update.message.reply_text(
             f"✅ Lista trovata!\n"
@@ -414,7 +429,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"❌ Lista non trovata\n\n"
-            f"💳 Costo creazione: €{极OSTO_MENSILE}/mese\n\n"
+            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n\n"
             "📆 Per quanti mesi vuoi creare la lista?\n"
             f"{esempi}\n\n"
             "Inserisci il numero di mesi:"
@@ -532,7 +547,7 @@ async def handle_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = [
         [
-            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),  # Corretto
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_{req_id}"),
             InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_{req_id}")
         ]
     ]
@@ -656,7 +671,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
         
-        await query.edit_message_text(f"✅ Richiesta #{req_id} approvata")  # Aggiunto await
+        await query.edit_message_text(f"✅ Richiesta #{req_id} approvata")
     
     elif data == "reject":
         cur.execute(
@@ -673,7 +688,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             logger.error(f"Errore nell'invio del messaggio all'utente: {e}")
         
-        await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")  # Aggiunto await
+        await query.edit_message_text(f"❌ Richiesta #{req_id} rifiutata")
     
     conn.commit()
     conn.close()
@@ -779,7 +794,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     conn.close()
 
 # Sistema di reminder
-async def check_expirations(context: ContextTypes.DEFAULT_TYPE):  # Aggiunto context
+async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
@@ -862,7 +877,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):  # Aggiunto con
                 # Aggiorna l'ultimo reminder (usa formato ISO per conservare il timezone)
                 cur.execute(
                     "UPDATE lists SET last_reminder = ? WHERE id = ?",
-                    (now.isoformat(), list_id)
+                    (now.is极format(), list_id)
                 )
         
         conn.commit()
@@ -972,7 +987,10 @@ def setup_handlers(application):
     
     # Handler conversazione gestione liste
     list_handler = ConversationHandler(
-        entry_points=[CommandHandler("manage", manage_list)],
+        entry_points=[
+            CommandHandler("manage", manage_list),
+            MessageHandler(filters.Regex(r'^📋 Gestisci Lista$'), manage_list)
+        ],
         states={
             LIST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_list_name)],
             ACTION_EXISTING: [
