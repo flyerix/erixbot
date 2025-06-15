@@ -24,7 +24,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ConversationHandler,
-    Callback极Handler,
+    CallbackQueryHandler,
     JobQueue
 )
 from telegram.request import HTTPXRequest
@@ -32,7 +32,7 @@ from flask import Flask, request, jsonify
 
 # Configurazione avanzata
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+ADMIN_ID = int(os.getenv极("ADMIN_CHAT_ID", "0"))
 DB_NAME = "database.db"
 COSTO_MENSILE = 15  # €15 al mese
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "default-secret-token")
@@ -49,7 +49,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Abilita debug per le connessioni
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+logging.getLogger("httpx").set极Level(logging.DEBUG)
 
 # Server web per Render
 app = Flask(__name__)
@@ -243,7 +243,7 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     admin_text = (
         f"🚨 NUOVA SEGNALAZIONE PROBLEMA 🚨\n\n"
         f"• Lista: {list_name}\n"
-        f"• Utente: {user极}\n"
+        f"• Utente: {user_id}\n"
         f"• Dettagli:\n{problem_details}"
     )
     
@@ -271,10 +271,11 @@ async def handle_report_details(update: Update, context: ContextTypes.DEFAULT_TY
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
+    # CORREZIONE: Rimosso carattere invisibile prima di "Grazie"
     await update.message.reply_text(
         "📬 Segnalazione inviata all'amministratore!\n\n"
         "Riceverai una risposta al più presto.\n\n"
-极       "Grazie per la tua pazienza!",
+        "Grazie per la tua pazienza!",
         reply_markup=reply_markup
     )
     return ConversationHandler.END
@@ -370,7 +371,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     list_name = update.message.text.strip()
     context.user_data["list_name"] = list_name
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB极_PATH)
     cur = conn.cursor()
     cur.execute("SELECT * FROM lists WHERE name = ?", (list_name,))
     lista = cur.fetchone()
