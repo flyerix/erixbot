@@ -117,7 +117,7 @@ def init_db():
         user_id INTEGER,
         problem_details TEXT,
         status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT极ESTAMP
     )
     """)
     conn.commit()
@@ -640,7 +640,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Aggiorna stato richiesta
         cur.execute(
             "UPDATE requests SET status = 'approved' WHERE id = ?",
-            (极id,)
+            (req_id,)
         )
         
         # Aggiungi dettagli pagamento se applicabile
@@ -734,7 +734,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     req_id = context.user_data["verify_req"]
     list_name = context.user_data["verify_list"]
     
-    conn = sqlite极.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     
     if text == "si":
@@ -748,7 +748,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             if ADMIN_ID:
                 await context.bot.send_message(
-                    chat_id=ADMIN_ID,
+                    chat_id=ADMIN极D,
                     text=f"✅ Utente {user_id} ha confermato la proprietà della lista '{list_name}'"
                 )
         except Exception as e:
