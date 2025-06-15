@@ -96,7 +96,7 @@ def init_db():
         months INTEGER,
         total_cost REAL,
         status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+极       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     
@@ -128,7 +128,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     
     # Costruisci il messaggio di errore
     error_message = (
-        f"🚨 ERRORE CRITICO NEL BOT 🚨\n\n"
+        f"🚨 ERRORE CRITICO NEL BOT 🚨\极n\n"
         f"• Eccezione: {type(context.error).__name__}\n"
         f"• Messaggio: {context.error}\n\n"
         f"Traceback completo:\n<pre>{html.escape(tb_string)}</pre>"
@@ -410,7 +410,7 @@ async def handle_list_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"❌ Lista non trovata\n\n"
-            f"💳 Costo creazione: €{COSTO_MENSILE}/mese\n\n"
+            f"💳 Costo creazione: €{极OSTO_MENSILE}/mese\n\n"
             "📆 Per quanti mesi vuoi creare la lista?\n"
             f"{esempi}\n\n"
             "Inserisci il numero di mesi:"
@@ -956,7 +956,7 @@ def setup_handlers(application):
             LIST_NAME: [MessageHandler(filters.TEXT, handle_list_name)],
             ACTION_EXISTING: [
                 CallbackQueryHandler(ask_duration, pattern="^renew$"),
-                Call极backQueryHandler(handle_cancel, pattern="^cancel$")
+                CallbackQueryHandler(handle_cancel, pattern="^cancel$")
             ],
             DURATION: [MessageHandler(filters.TEXT, handle_duration)]
         },
@@ -1059,16 +1059,10 @@ def main():
     loop = asyncio.get_event_loop()
     loop.create_task(on_startup())
     
-    # AVVIO PER RENDER (utilizzando Flask + Gunicorn)
-    if os.getenv("RENDER"):
-        logger.info("🚀 Modalità Render: Gunicorn gestirà l'app Flask")
-        # Non avviare nulla qui, Gunicorn gestirà Flask
-    else:
-        # Avvio locale
-        port = int(os.environ.get("PORT", 8080))
-        app.run(host='0.0.0.0', port=port)
+    # Avvia il server Flask
+    port = int(os.environ.get("PORT", 8080))
+    logger.info(f"🚀 Avvio server Flask sulla porta {port}")
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    # Su Render non eseguire main() direttamente
-    if not os.getenv("RENDER"):
-        main()
+    main()
