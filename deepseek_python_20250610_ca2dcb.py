@@ -32,7 +32,7 @@ from flask import Flask, request, jsonify
 
 # Configurazione avanzata
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_ID = int(os.getenv极("ADMIN_CHAT_ID", "0"))
+ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
 DB_NAME = "database.db"
 COSTO_MENSILE = 15  # €15 al mese
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "default-secret-token")
