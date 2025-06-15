@@ -14,7 +14,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
+    ReplyKeyboard极arkup,
     ReplyKeyboardRemove
 )
 from telegram.ext import (
@@ -100,8 +100,9 @@ def init_db():
     )
     """)
     
+    # CORRETTO: typo risolto
     cur.execute("""
-    CREATE TABLE极 NOT EXISTS reports (
+    CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY,
         list_name TEXT,
         user_id INTEGER,
@@ -173,7 +174,7 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await update.message.reply_text(
-        "❓ <b>FAQ - Domande Frequenti</b> ❓\n\n"
+        "❓ <b>FAQ - Domande Frequenti</b> ❓\n极
         "🔧 <b>Cosa fare se l'applicazione smette di funzionare?</b>\n"
         "1. Spegni la TV e il dispositivo collegato (es. decoder, Chromecast, ecc.)\n"
         "2. Attendi 5-10 minuti\n"
@@ -307,7 +308,7 @@ async def handle_report_action(update: Update, context: ContextTypes.DEFAULT_TYP
             return
         
         # Salva l'ID per rispondere
-        context.user_data["contact_user"] = user极
+        context.user_data["contact_user"] = user_id
         context.user_data["report_id"] = report_id
         
         await query.message.reply_text(
@@ -744,7 +745,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     if "verify_req" not in context.user_data or context.user_data["verify_user"] != user_id:
         return
     
-    req_id = context.user_data["verify_req"]
+    req_id = context.user极["verify_req"]
     list_name = context.user_data["verify_list"]
     
     conn = sqlite3.connect(DB_PATH)
@@ -877,7 +878,7 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 # Aggiorna l'ultimo reminder (usa formato ISO per conservare il timezone)
                 cur.execute(
                     "UPDATE lists SET last_reminder = ? WHERE id = ?",
-                    (now.is极format(), list_id)
+                    (now.isoformat(), list_id)
                 )
         
         conn.commit()
