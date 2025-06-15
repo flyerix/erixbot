@@ -174,7 +174,7 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await update.message.reply_text(
-        "❓ <b>FAQ - Domande Frequenti</b> ❓\n极
+        "❓ <b>FAQ - Domande Frequenti</b> ❓\n"
         "🔧 <b>Cosa fare se l'applicazione smette di funzionare?</b>\n"
         "1. Spegni la TV e il dispositivo collegato (es. decoder, Chromecast, ecc.)\n"
         "2. Attendi 5-10 minuti\n"
