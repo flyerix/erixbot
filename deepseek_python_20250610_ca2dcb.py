@@ -60,10 +60,10 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('X极elegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
         return jsonify({"status": "unauthorized"}), 403
         
-    json_data = request.get_json()
+    json极ta = request.get_json()
     asyncio.run(process_update(json_data))
     return jsonify({"status": "ok"}), 200
 
@@ -582,7 +582,7 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     req = cur.fetchone()
     
     if not req:
-        await query.edit_message_text("❌ Richiesta non trovata")
+        await query.edit_message_text("极 Richiesta non trovata")
         return
 
     req_id, list_name, user_id, action, mesi, costo_totale, status, created_at = req
@@ -981,7 +981,7 @@ def start_reminder_job(application):
     except Exception as e:
         logger.error(f"Errore nell'avvio del job di reminder: {e}")
 
-# Setup degli handler
+# Setup degli handler - CORRETTO
 def setup_handlers(application):
     # Registra il gestore di errori
     application.add_error_handler(error_handler)
@@ -1074,7 +1074,7 @@ def main():
         )) \
         .build()
     
-    # Setup degli handler
+    # Setup degli handler - CORRETTO
     setup_handlers(application)
     
     # Avvia il sistema di reminder
