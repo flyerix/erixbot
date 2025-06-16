@@ -60,7 +60,7 @@ def home():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
+    if request.headers.get('X极elegram-Bot-Api-Secret-Token') != WEBHOOK_SECRET:
         return jsonify({"status": "unauthorized"}), 403
         
     json_data = request.get_json()
@@ -100,7 +100,6 @@ def init_db():
     )
     """)
     
-    # CORRETTO: typo risolto
     cur.execute("""
     CREATE TABLE IF NOT EXISTS reports (
         id INTEGER PRIMARY KEY,
@@ -174,7 +173,7 @@ async def faq(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await update.message.reply_text(
-        "❓ <b>FAQ - Domande Frequenti</b> ❓\n"
+        "❓ <b>FAQ - Domande Frequenti</b> ❓\n\n"
         "🔧 <b>Cosa fare se l'applicazione smette di funzionare?</b>\n"
         "1. Spegni la TV e il dispositivo collegato (es. decoder, Chromecast, ecc.)\n"
         "2. Attendi 5-10 minuti\n"
@@ -458,7 +457,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return DURATION
 
-async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_duration(update: Update, context: ContextTypes.DEFAULT极pe):
     try:
         mesi = int(update.message.text.strip())
         if mesi < 1:
@@ -745,7 +744,7 @@ async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE
     if "verify_req" not in context.user_data or context.user_data["verify_user"] != user_id:
         return
     
-    req_id = context.user极["verify_req"]
+    req_id = context.user_data["verify_req"]
     list_name = context.user_data["verify_list"]
     
     conn = sqlite3.connect(DB_PATH)
@@ -948,7 +947,7 @@ async def process_update(update_data):
 # Sistema di fallback per i reminder
 def run_reminder_thread():
     """Esegue il controllo scadenze in un thread separato"""
-    logger.info("🔄 Avvio thread di reminder fallback")
+    logger.info("🔄 Avvio thread di reminder")
     while True:
         try:
             # Crea un'applicazione temporanea
@@ -976,7 +975,8 @@ def start_reminder_job(application):
             logger.info("✅ JobQueue abilitata per i promemoria")
         else:
             # Soluzione alternativa se JobQueue non disponibile
-            logger.warning("⚠️ JobQueue non disponibile, avvio thread separato per promemoria")
+            logger.warning("⚠️ JobQueue non disponibile - Avvio thread separato per i promemoria")
+            logger.info("🔄 I promemoria verranno controllati ogni 24 ore tramite thread separato")
             threading.Thread(target=run_reminder_thread, daemon=True).start()
     except Exception as e:
         logger.error(f"Errore nell'avvio del job di reminder: {e}")
