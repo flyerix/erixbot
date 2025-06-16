@@ -457,7 +457,7 @@ async def ask_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return DURATION
 
-async def handle_duration(update: Update, context: ContextTypes.DEFAULT_Type):
+async def handle_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         mesi = int(update.message.text.strip())
         if mesi < 1:
