@@ -1,4 +1,6 @@
 import logging
+import sys
+import signal
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -189,7 +191,7 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = get_service_status()
     
     faq_text = f"""
-🔍 **F.A.Q. - Domande Frequenti**
+🔍 **F.A.Q. - Domande Frequenti** 
 
 {status_message}
 
@@ -334,20 +336,20 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Totale: €{total}\n\n"
             f"📥 Ticket ID: #{ticket_id}"
         )
-        await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
-        
-        # Conferma utente
-        user_msg = (
-            f"✅ **Ticket creato!** (#{ticket_id})\n\n"
-            f"La tua richiesta di rinnovo è stata registrata. "
-            f"Un operatore ti contatterà a breve per completare l'operazione.\n\n"
-            f"Riepilogo:\n"
-            f"- Lista: {context.user_data['list_name']}\n"
-            f"- Mesi: {months}\n"
-            f"- Totale: €{total}"
-        )
-        await update.message.reply_text(user_msg, parse_mode='Markdown')
-        return ConversationHandler.END
+    await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
+    
+    # Conferma utente
+    user_msg = (
+        f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+        f"La tua richiesta di rinnovo è stata registrata. "
+        f"Un operatore ti contatterà a breve per completare l'operazione.\n\n"
+        f"Riepilogo:\n"
+        f"- Lista: {context.user_data['list_name']}\n"
+        f"- Mesi: {months}\n"
+        f"- Totale: €{total}"
+    )
+    await update.message.reply_text(user_msg, parse_mode='Markdown')
+    return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)")
         return MONTHS
@@ -579,6 +581,16 @@ async def public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- SETUP APPLICAZIONE ----------
 def main():
+    # Configurazione gestione segnali per terminazione pulita
+    def shutdown_handler(signum, frame):
+        signame = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+        logging.info(f"Ricevuto segnale {signame}, terminazione pulita...")
+        sys.exit(0)
+    
+    # Registra i gestori per SIGINT (Ctrl+C) e SIGTERM (terminazione)
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    
     application = ApplicationBuilder().token(TOKEN).build()
     
     # Gestore conversazione principale
