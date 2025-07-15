@@ -1,3 +1,5 @@
+import time
+time.sleep(10)  # Da tempo al bot di avviarsi
 import logging
 import sys
 import signal
