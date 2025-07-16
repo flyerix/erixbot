@@ -317,53 +317,50 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if months <= 0:
             raise ValueError
 
+        # Calcolo costo
         total = months * 15
-        context.user_data['data'] = f"Lista: {context.user_data['list_name']}
-Mesi: {months}
-Totale: €{total}"
+        context.user_data['data'] = (
+            f"Lista: {context.user_data['list_name']}\n"
+            f"Mesi: {months}\n"
+            f"Totale: €{total}"
+        )
+
+        # Creazione ticket
         ticket_id = create_ticket(context.user_data, 'renewal')
 
+        # Notifica admin
         admin_msg = (
-            f"🚨 NUOVO TICKET DI RINNOVO (#{{ticket_id}})
-"
-            f"User: @{{update.message.from_user.username}} | ID: {{update.message.from_user.id}}
-"
-            f"Lista: {{context.user_data['list_name']}}
-"
-            f"Mesi: {{months}}
-"
-            f"Totale: €{{total}}
-
-"
-            f"📥 Ticket ID: #{{ticket_id}}"
+            f"🚨 NUOVO TICKET DI RINNOVO (#{ticket_id})\n"
+            f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+            f"Lista: {context.user_data['list_name']}\n"
+            f"Mesi: {months}\n"
+            f"Totale: €{total}\n\n"
+            f"📥 Ticket ID: #{ticket_id}"
         )
         await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
+        # Conferma utente
         user_msg = (
-            f"✅ **Ticket creato!** (#{{ticket_id}})
-
-"
+            f"✅ **Ticket creato!** (#{ticket_id})\n\n"
             f"La tua richiesta di rinnovo è stata registrata. "
-            f"Un operatore ti contatterà a breve per completare l'operazione.
-
-"
-            f"Riepilogo:
-"
-            f"- Lista: {{context.user_data['list_name']}}
-"
-            f"- Mesi: {{months}}
-"
-            f"- Totale: €{{total}}"
+            f"Un operatore ti contatterà a breve per completare l'operazione.\n\n"
+            f"Riepilogo:\n"
+            f"- Lista: {context.user_data['list_name']}\n"
+            f"- Mesi: {months}\n"
+            f"- Totale: €{total}"
         )
         await update.message.reply_text(user_msg, parse_mode='Markdown')
+
         return ConversationHandler.END
+
     except ValueError:
         await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)")
         return MONTHS
     except Exception as e:
-        logging.error(f"Errore inaspettato: {{e}}")
+        logging.error(f"Errore inaspettato: {e}")
         await update.message.reply_text("❌ Si è verificato un errore inaspettato.")
         return MONTHS
+
 
     except ValueError:
         await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)")
