@@ -124,7 +124,7 @@ def get_service_status():
     last_updated = service_status["last_updated"].strftime("%d/%m/%Y %H:%M:%S")
     
     return (
-        f"{status_icons[service_status['status']} **STATO DEL SERVIZIO: {status_text[service_status['status']}**\n\n"
+        f"{status_icons[service_status['status']]} **STATO DEL SERVIZIO: {status_text[service_status['status']]}**\n\n"
         f"📝 Messaggio:\n{service_status['message']}\n\n"
         f"🕒 Ultimo aggiornamento: {last_updated}\n\n"
         f"ℹ️ Per assistenza: /start"
