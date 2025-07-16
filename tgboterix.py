@@ -19,8 +19,8 @@ import uuid
 from datetime import datetime, timedelta
 
 # Configurazione
-TOKEN = "INSERISCI_IL_TUO_TOKEN_BOT"
-ADMIN_CHAT_ID = "ID_CHAT_ADMIN"
+TOKEN = "7571618097:AAGdsiEE1cl4LfPdY5ISPZ9ZYqsiXyEMu8s"
+ADMIN_CHAT_ID = "691735614"
 LOGGING = True
 
 # Stati della conversazione
