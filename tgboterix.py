@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timedelta
 
 # Configurazione
-TOKEN = "7571618097:AAGdsiEE1cl4LfPdY5ISPZ9ZYqsiXyEMu8s"
+TOKEN = "7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ"
 ADMIN_CHAT_ID = 691735614
 LOGGING = True
 
