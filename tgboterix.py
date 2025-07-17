@@ -21,9 +21,11 @@ from datetime import datetime, timedelta
 # =========================
 # CONFIGURAZIONE SICURA
 # =========================
-TOKEN = os.environ.get("TGBOTERIX_TOKEN", "7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")  # Usa variabile ambiente per sicurezza
-ADMIN_CHAT_ID = int(os.environ.get("TGBOTERIX_ADMIN_CHAT_ID", 691735614))
-LOGGING = True
+TOKEN = os.environ.get("TGBOTERIX_TOKEN", "7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")
+if not TOKEN:
+    raise RuntimeError("Il token del bot Telegram non è stato trovato in variabile ambiente TGBOTERIX_TOKEN.")
+ADMIN_CHAT_ID = int(os.environ.get("TGBOTERIX_ADMIN_CHAT_ID", "691735614"))
+LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
 
 # Stati della conversazione
 LIST_NAME, MONTHS, NEW_CUSTOMER_DETAILS, ASSISTANCE_DETAILS, CONTENT_TYPE, CONTENT_DETAILS = range(6)
@@ -55,6 +57,8 @@ if LOGGING:
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         level=logging.INFO
     )
+
+logger = logging.getLogger(__name__)
 
 # ---------- FUNZIONI TICKETING ----------
 def create_ticket(user_data: dict, ticket_type: str) -> str:
@@ -245,6 +249,10 @@ async def content_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     content_type = query.data
+    if content_type not in CONTENT_TYPES:
+        await query.edit_message_text("❌ Tipo di contenuto non valido.")
+        return CONTENT_TYPE
+
     context.user_data['content_type'] = content_type
     context.user_data['content_type_name'] = CONTENT_TYPES[content_type]
 
@@ -332,8 +340,8 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_msg = (
             f"✅ **Ticket creato!** (#{ticket_id})\n\n"
-            f"La tua richiesta di rinnovo è stata registrata. "
-            f"Un operatore ti contatterà a breve per completare l'operazione.\n\n"
+            "La tua richiesta di rinnovo è stata registrata. "
+            "Un operatore ti contatterà a breve per completare l'operazione.\n\n"
             f"Riepilogo:\n"
             f"- Lista: {context.user_data['list_name']}\n"
             f"- Mesi: {months}\n"
@@ -347,7 +355,7 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)")
         return MONTHS
     except Exception as e:
-        logging.error(f"Errore inaspettato: {e}")
+        logger.error(f"Errore inaspettato: {e}")
         await update.message.reply_text("❌ Si è verificato un errore inaspettato.")
         return MONTHS
 
@@ -407,7 +415,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- COMANDI AMMINISTRATORE ----------
 async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if int(update.message.chat_id) != ADMIN_CHAT_ID:
+    # Usa chat.id per meglio compatibilità con gruppi/canali
+    chat_id = getattr(update.effective_chat, "id", None)
+    if chat_id != ADMIN_CHAT_ID:
+        await update.message.reply_text("Non hai i permessi per eseguire questo comando.")
         return
 
     command = update.message.text.split()[0][1:]
@@ -457,7 +468,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=user_msg
                 )
             except Exception as e:
-                logging.error(f"Errore notifica chiusura ticket: {e}")
+                logger.error(f"Errore notifica chiusura ticket: {e}")
         else:
             await update.message.reply_text("❌ Ticket non trovato!")
 
@@ -496,7 +507,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode='Markdown'
                     )
                 except Exception as e:
-                    logging.error(f"Errore notifica stato servizio: {e}")
+                    logger.error(f"Errore notifica stato servizio: {e}")
 
         await update.message.reply_text(f"✅ Stato servizio aggiornato a: {new_status}\n\nMessaggio: {status_message}")
 
@@ -579,19 +590,22 @@ def main():
             CONTENT_TYPE: [CallbackQueryHandler(content_type_handler)],
             CONTENT_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, content_details_handler)]
         },
-        fallbacks=[CommandHandler('cancel', cancel)]
+        fallbacks=[CommandHandler('cancel', cancel)],
+        allow_reentry=True
     )
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('status', public_status))
     application.add_handler(CommandHandler('tickets', admin_commands))
     application.add_handler(CommandHandler('close', admin_commands))
+    # Solo admin può cambiare stato servizio
     application.add_handler(CommandHandler('status', admin_commands, filters=filters.Chat(ADMIN_CHAT_ID)))
     application.add_handler(CommandHandler('statusreport', admin_commands))
     application.add_handler(CommandHandler('addcontent', admin_commands))
     application.add_handler(CallbackQueryHandler(faq_callback, pattern='^faq$'))
     application.add_handler(conv_handler)
 
+    logger.info("Erixbot avviato e in polling...")
     application.run_polling()
 
 if __name__ == '__main__':
