@@ -205,7 +205,7 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📽️ *Richiesta contenuti:*
 - Puoi richiedere nuovi film/serie ecc.. tramite il menu "🎬 Richiedi Contenuto"
-- I contenuti vengono elaborati e gestiti dal sistema.
+- I contenuti vengono elaborati e gestiti dal sistema, i tempi sono quindi variabili.
 
 💳 *Pagamenti:*
 - Costo mensile: €15
@@ -299,12 +299,12 @@ async def content_details_handler(update: Update, context: ContextTypes.DEFAULT_
 
     user_msg = (
         f"✅ **Richiesta registrata!** (#{ticket_id})\n\n"
-        f"La tua richiesta per {context.user_data['content_type_name'].lower()} è stata inviata al nostro team.\n\n"
+        f"La tua richiesta per {context.user_data['content_type_name'].lower()} è stata inviata.\n\n"
         f"📝 Dettagli:\n"
         f"- Lista: {context.user_data['list_name']}\n"
         f"- Tipo: {context.user_data['content_type_name']}\n"
         f"- Contenuto: {content_details}\n\n"
-        f"Ti invieremo una notifica quando il contenuto sarà disponibile sulla tua lista!"
+        f"Ti invieremo una notifica quando il contenuto sarà disponibile e/o processato!"
     )
     await update.message.reply_text(user_msg, parse_mode='Markdown')
 
@@ -339,7 +339,7 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_msg = (
             f"✅ **Ticket creato!** (#{ticket_id})\n\n"
             "La tua richiesta di rinnovo è stata registrata. "
-            "Un operatore ti contatterà a breve per completare l'operazione.\n\n"
+            "Verrai contattato a breve per completare l'operazione.\n\n"
             f"Riepilogo:\n"
             f"- Lista: {context.user_data['list_name']}\n"
             f"- Mesi: {months}\n"
@@ -376,7 +376,7 @@ async def new_customer_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_msg = (
         f"✅ **Ticket creato!** (#{ticket_id})\n\n"
         "La tua richiesta di attivazione è stata registrata. "
-        "Un operatore ti contatterà entro 24h per completare l'attivazione.\n\n"
+        "Verrai contattato per completare l'attivazione.\n\n"
         f"Dettagli inviati:\n{user_details}"
     )
     await update.message.reply_text(user_msg)
@@ -401,7 +401,7 @@ async def assistance_details_handler(update: Update, context: ContextTypes.DEFAU
     user_msg = (
         f"✅ **Ticket creato!** (#{ticket_id})\n\n"
         "La tua richiesta di assistenza è stata registrata. "
-        "Un operatore ti contatterà al più presto.\n\n"
+        "Verrai contattato al più presto.\n\n"
         f"Dettagli del problema:\n{assistance_details}"
     )
     await update.message.reply_text(user_msg)
@@ -495,7 +495,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{alert_icon} **{alert_text[new_status]}**\n\n"
                 f"{status_message}\n\n"
                 f"🕒 Aggiornato: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-                f"🔧 Il nostro team sta lavorando per risolvere il problema"
+                f"🔧 Stiamo lavorando per risolvere il problema"
             )
             for ticket in open_tickets.values():
                 try:
@@ -547,7 +547,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ticket_id in tickets_db and tickets_db[ticket_id]['type'] == 'content_request':
             user_msg = (
                 f"🎉 **Il contenuto che hai richiesto è stato aggiunto!**\n\n"
-                f"Ecco il link per accedere direttamente:\n"
+                f"Puoi trovarlo nella apposita sezione:\n"
                 f"{content_url}\n\n"
                 f"Grazie per la tua richiesta!"
             )
