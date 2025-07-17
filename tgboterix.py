@@ -159,13 +159,13 @@ async def service_status_callback(update: Update, context: ContextTypes.DEFAULT_
 async def assistenza_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Per favore inserisci il **nome della lista** associata al tuo account:", parse_mode='Markdown')
+    await query.edit_message_text("Per favore inserisci il **nome della lista** associata:", parse_mode='Markdown')
     return LIST_NAME
 
 async def nuova_linea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome completo\n- Email\n- Città\n- Numero di telefono\n\nScrivi tutto in un unico messaggio.")
+    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome Account \n- \nScrivi tutto in un unico messaggio.")
     return NEW_CUSTOMER_DETAILS
 
 async def richiedi_contenuto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +181,7 @@ async def assistenza_personalizzata_callback(update: Update, context: ContextTyp
     status_message = get_service_status()
     await query.edit_message_text(
         f"{status_message}\n\n"
-        "Descrivi il tuo problema o la tua richiesta di assistenza. Un operatore ti risponderà al più presto:",
+        "Ti risponderemo il prima possibile, per favore, descrivi il problema:",
         parse_mode='Markdown'
     )
     return ASSISTANCE_DETAILS
@@ -198,23 +198,21 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ---
 
 🛠️ *Problemi di connessione:*
-1. Riavvia il modem per 5 minuti
-2. Controlla i cavi di alimentazione
-3. Controlla lo stato del servizio con il comando /status
+1. Controlla i cavi di alimentazione
+2. Spegni e riaccendi il dispositivo per 5/10 minuti
+3. Se non dovesse bastare, spegnere il modem/router per 5/10 minuti
+4. Controlla lo stato del servizio con il comando /status
 
 📽️ *Richiesta contenuti:*
-- Puoi richiedere nuovi film/serie tramite il menu "🎬 Richiedi Contenuto"
-- I contenuti vengono aggiunti entro 72h dalla richiesta
-- Riceverai notifica quando il contenuto è disponibile
+- Puoi richiedere nuovi film/serie ecc.. tramite il menu "🎬 Richiedi Contenuto"
+- I contenuti vengono elaborati e gestiti dal sistema.
 
 💳 *Pagamenti:*
 - Costo mensile: €15
-- Pagamenti accettati: Carta, PayPal, Crypto
-- Riceverai fattura via email
+- Pagamenti accettati: Crypto, VaV
 
 📦 *Nuove attivazioni:*
-- Tempo di attivazione: 24h lavorative
-- Necessario documento d'identità
+- Tempo di attivazione: Circa 24h
 
 Scrivi /start per tornare al menu"""
     await query.edit_message_text(faq_text, parse_mode='Markdown')
