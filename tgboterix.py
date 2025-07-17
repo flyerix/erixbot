@@ -142,7 +142,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❓ FAQ", callback_data='faq')]
     ]
     await update.message.reply_text(
-        "Benvenuto nell'assistenza Pay-Per-View!\nScegli un'opzione:",
+        "Benvenuto/a! Sono Erixbot, come posso aiutarti?\nScegli un'opzione:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
