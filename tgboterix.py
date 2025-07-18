@@ -28,7 +28,7 @@ ADMIN_CHAT_ID = int(os.environ.get("TGBOTERIX_ADMIN_CHAT_ID", "691735614"))
 LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
 
 # Stati della conversazione
-LIST_NAME, MONTHS, NEW_CUSTOMER_DETAILS, ASSISTANCE_DETAILS, CONTENT_TYPE, CONTENT_DETAILS = range(6)
+LIST_NAME, MONTHS, NEW_CUSTOMER_DETAILS, ASSISTANCE_DETAILS, CONTENT_TYPE, CONTENT_DETAILS, ATTACHMENT = range(7)
 
 # Database ticketing (in produzione usare database esterno)
 tickets_db = {}
@@ -72,7 +72,8 @@ def create_ticket(user_data: dict, ticket_type: str) -> str:
         'data': user_data.get('data', ''),
         'status': 'open',
         'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'assigned_to': None
+        'assigned_to': None,
+        'attachment': user_data.get('attachment', None)
     }
     tickets_db[ticket_id] = ticket
     open_tickets[ticket_id] = ticket
@@ -388,12 +389,64 @@ async def assistance_details_handler(update: Update, context: ContextTypes.DEFAU
     context.user_data['username'] = update.message.from_user.username
     context.user_data['data'] = assistance_details
 
+    # Chiedi se vuole allegare un file
+    await update.message.reply_text(
+        "Vuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato."
+    )
+    return ATTACHMENT
+
+async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Gestione allegato photo
+    attachment_info = ""
+    if update.message.photo:
+        # Prendi la foto con la massima risoluzione
+        photo_file = update.message.photo[-1]
+        context.user_data['attachment'] = photo_file.file_id
+        attachment_info = "Allegato: [Screenshot]"
+    elif update.message.document:
+        context.user_data['attachment'] = update.message.document.file_id
+        attachment_info = f"Allegato: {update.message.document.file_name}"
+    else:
+        await update.message.reply_text("❌ File non valido. Invia una foto o un documento.")
+        return ATTACHMENT
+
     ticket_id = create_ticket(context.user_data, 'assistance')
 
     admin_msg = (
         f"🚨 NUOVO TICKET ASSISTENZA (#{ticket_id})\n"
         f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
-        f"Richiesta:\n{assistance_details}\n\n"
+        f"Richiesta:\n{context.user_data['data']}\n"
+        f"{attachment_info}\n\n"
+        f"📥 Ticket ID: #{ticket_id}"
+    )
+    # Invia il messaggio all'admin con l'allegato
+    if 'attachment' in context.user_data:
+        await context.bot.send_photo(
+            ADMIN_CHAT_ID,
+            context.user_data['attachment'],
+            caption=admin_msg
+        )
+    else:
+        await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
+
+    user_msg = (
+        f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+        "La tua richiesta di assistenza è stata registrata. "
+        "Verrai contattato al più presto.\n\n"
+        f"Dettagli del problema:\n{context.user_data['data']}\n"
+        f"{attachment_info}"
+    )
+    await update.message.reply_text(user_msg)
+    return ConversationHandler.END
+
+async def skip_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Procedi senza allegato
+    ticket_id = create_ticket(context.user_data, 'assistance')
+
+    admin_msg = (
+        f"🚨 NUOVO TICKET ASSISTENZA (#{ticket_id})\n"
+        f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+        f"Richiesta:\n{context.user_data['data']}\n"
         f"📥 Ticket ID: #{ticket_id}"
     )
     await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
@@ -402,7 +455,7 @@ async def assistance_details_handler(update: Update, context: ContextTypes.DEFAU
         f"✅ **Ticket creato!** (#{ticket_id})\n\n"
         "La tua richiesta di assistenza è stata registrata. "
         "Verrai contattato al più presto.\n\n"
-        f"Dettagli del problema:\n{assistance_details}"
+        f"Dettagli del problema:\n{context.user_data['data']}"
     )
     await update.message.reply_text(user_msg)
     return ConversationHandler.END
@@ -585,6 +638,10 @@ def main():
             MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, months_handler)],
             NEW_CUSTOMER_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, new_customer_handler)],
             ASSISTANCE_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, assistance_details_handler)],
+            ATTACHMENT: [
+                MessageHandler(filters.PHOTO | filters.Document.ALL, attachment_handler),
+                CommandHandler('skip', skip_attachment)
+            ],
             CONTENT_TYPE: [CallbackQueryHandler(content_type_handler)],
             CONTENT_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, content_details_handler)]
         },
