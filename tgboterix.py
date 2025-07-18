@@ -26,6 +26,30 @@ if not TOKEN:
     raise RuntimeError("Il token del bot Telegram non è stato trovato in variabile ambiente TGBOTERIX_TOKEN.")
 ADMIN_CHAT_ID = int(os.environ.get("TGBOTERIX_ADMIN_CHAT_ID", "691735614"))
 LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
+LOG_FILENAME = os.environ.get("TGBOTERIX_LOGFILE", "erixbot.log")  # puoi cambiare il nome del file
+
+# --- CONFIGURAZIONE LOGGING AVANZATA ---
+if LOGGING:
+    # Crea un formato comune
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Handler per la console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)  # Solo INFO e superiori su console
+
+    # Handler per il file
+    file_handler = logging.FileHandler(LOG_FILENAME, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)    # Tutto su file (DEBUG incluso)
+
+    # Configura il logger root
+    logging.basicConfig(
+        level=logging.DEBUG,  # Livello globale
+        handlers=[console_handler, file_handler]
+    )
+
+logger = logging.getLogger(__name__)
 
 # Stati della conversazione
 LIST_NAME, MONTHS, NEW_CUSTOMER_DETAILS, ASSISTANCE_DETAILS, CONTENT_TYPE, CONTENT_DETAILS, ATTACHMENT = range(7)
