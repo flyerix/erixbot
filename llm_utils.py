@@ -2,7 +2,7 @@ import os
 import requests
 import logging
 
-OPENAI_API_KEY = os.environ.get("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")
+OPENAI_API_KEY = os.environ.get("OPEN_API_KEY")
 LLM_ENDPOINT = os.environ.get("LLM_ENDPOINT")  # opzionale, per LLM locale
 logger = logging.getLogger(__name__)
 
