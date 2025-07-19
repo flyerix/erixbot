@@ -1,10 +1,13 @@
 import logging
 import os
+import sys
+import uuid
+from datetime import datetime
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardRemove
+    ReplyKeyboardRemove,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -15,58 +18,48 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler,
 )
-import uuid
-from datetime import datetime, timedelta
 
 # =========================
 # CONFIGURAZIONE SICURA
 # =========================
-TOKEN = os.environ.get("TGBOTERIX_TOKEN", "7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")
-if not TOKEN:
-    raise RuntimeError("Il token del bot Telegram non è stato trovato in variabile ambiente TGBOTERIX_TOKEN.")
-ADMIN_CHAT_ID = int(os.environ.get("TGBOTERIX_ADMIN_CHAT_ID", "691735614"))
+TOKEN = os.environ.get("7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")
+ADMIN_CHAT_ID = os.environ.get("691735614")
 LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
-LOG_FILENAME = os.environ.get("TGBOTERIX_LOGFILE", "erixbot.log")  # puoi cambiare il nome del file
+LOG_FILENAME = os.environ.get("TGBOTERIX_LOGFILE", "erixbot.log")
 
-# --- CONFIGURAZIONE LOGGING AVANZATA ---
+if not TOKEN or not ADMIN_CHAT_ID:
+    print("Errore: variabili di ambiente TGBOTERIX_TOKEN e TGBOTERIX_ADMIN_CHAT_ID sono obbligatorie.")
+    sys.exit(1)
+ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
+
+# --- CONFIGURAZIONE LOGGING ---
 if LOGGING:
-    # Crea un formato comune
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    # Handler per la console
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)  # Solo INFO e superiori su console
-
-    # Handler per il file
+    console_handler.setLevel(logging.INFO)
     file_handler = logging.FileHandler(LOG_FILENAME, encoding='utf-8')
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)    # Tutto su file (DEBUG incluso)
-
-    # Configura il logger root
-    logging.basicConfig(
-        level=logging.DEBUG,  # Livello globale
-        handlers=[console_handler, file_handler]
-    )
+    file_handler.setLevel(logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, file_handler])
 
 logger = logging.getLogger(__name__)
 
-# Stati della conversazione
+# =========================
+# COSTANTI E DATI
+# =========================
 LIST_NAME, MONTHS, NEW_CUSTOMER_DETAILS, ASSISTANCE_DETAILS, CONTENT_TYPE, CONTENT_DETAILS, ATTACHMENT = range(7)
 
-# Database ticketing (in produzione usare database esterno)
 tickets_db = {}
 open_tickets = {}
 
-# Stato del servizio
 service_status = {
-    "status": "operational",  # operational, degraded, outage
+    "status": "operational",
     "last_updated": datetime.now(),
     "message": "✅ Tutti i servizi funzionano correttamente",
     "incident_history": []
 }
 
-# Tipi di contenuto disponibili
 CONTENT_TYPES = {
     "movie": "🎬 Film",
     "tvshow": "📺 Serie TV",
@@ -75,23 +68,18 @@ CONTENT_TYPES = {
     "other": "❓ Altro"
 }
 
-# Avvio logging
-if LOGGING:
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
 
-logger = logging.getLogger(__name__)
+# =========================
+# FUNZIONI TICKETING
+# =========================
 
-# ---------- FUNZIONI TICKETING ----------
 def create_ticket(user_data: dict, ticket_type: str) -> str:
     """Crea un nuovo ticket nel sistema"""
     ticket_id = str(uuid.uuid4())[:8].upper()
     ticket = {
         'id': ticket_id,
         'user_id': user_data.get('user_id'),
-        'username': user_data.get('username'),
+        'username': user_data.get('username') or "unknown",
         'type': ticket_type,
         'data': user_data.get('data', ''),
         'status': 'open',
@@ -101,6 +89,7 @@ def create_ticket(user_data: dict, ticket_type: str) -> str:
     }
     tickets_db[ticket_id] = ticket
     open_tickets[ticket_id] = ticket
+    logger.info(f"Nuovo ticket creato: {ticket_id}, tipo: {ticket_type}")
     return ticket_id
 
 def close_ticket(ticket_id: str):
@@ -109,13 +98,16 @@ def close_ticket(ticket_id: str):
         tickets_db[ticket_id]['status'] = 'closed'
         tickets_db[ticket_id]['closed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         open_tickets.pop(ticket_id, None)
+        logger.info(f"Ticket chiuso: {ticket_id}")
 
-# ---------- GESTIONE STATO SERVIZIO ----------
+# =========================
+# GESTIONE STATO SERVIZIO
+# =========================
+
 def update_service_status(new_status: str, message: str, admin: str):
     """Aggiorna lo stato del servizio e tiene traccia della storia"""
     global service_status
 
-    # Registra incidente storico
     if new_status != "operational":
         incident = {
             "status": new_status,
@@ -125,34 +117,23 @@ def update_service_status(new_status: str, message: str, admin: str):
             "updated_by": admin
         }
         service_status["incident_history"].append(incident)
+        logger.warning(f"Nuovo incidente registrato: {new_status}")
     elif service_status["status"] != "operational":
-        # Chiudi l'ultimo incidente se stiamo tornando operativi
         if service_status["incident_history"]:
             service_status["incident_history"][-1]["end_time"] = datetime.now()
+            logger.info("Incidente chiuso, servizio tornato operativo")
 
-    # Aggiorna stato corrente
     service_status["status"] = new_status
     service_status["message"] = message
     service_status["last_updated"] = datetime.now()
-
+    logger.info(f"Stato aggiornato: {new_status} - {message}")
     return service_status
 
 def get_service_status():
     """Restituisce lo stato corrente del servizio formattato"""
-    status_icons = {
-        "operational": "🟢",
-        "degraded": "🟡",
-        "outage": "🔴"
-    }
-
-    status_text = {
-        "operational": "OPERATIVO",
-        "degraded": "DEGRADATO",
-        "outage": "NON OPERATIVO"
-    }
-
+    status_icons = {"operational": "🟢", "degraded": "🟡", "outage": "🔴"}
+    status_text = {"operational": "OPERATIVO", "degraded": "DEGRADATO", "outage": "NON OPERATIVO"}
     last_updated = service_status["last_updated"].strftime("%d/%m/%Y %H:%M:%S")
-
     return (
         f"{status_icons[service_status['status']]} **STATO DEL SERVIZIO: {status_text[service_status['status']]}**\n\n"
         f"📝 Messaggio:\n{service_status['message']}\n\n"
@@ -160,8 +141,13 @@ def get_service_status():
         f"ℹ️ Per assistenza: /start"
     )
 
-# ---------- HANDLERS PRINCIPALI ----------
+
+# =========================
+# HANDLERS PRINCIPALI
+# =========================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"/start richiesto da user_id={update.effective_user.id}")
     keyboard = [
         [InlineKeyboardButton("🧾 Assistenza Clienti", callback_data='assistenza')],
         [InlineKeyboardButton("🆕 Nuova Linea", callback_data='nuova_linea')],
@@ -190,7 +176,7 @@ async def assistenza_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def nuova_linea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome Account \n- \nScrivi tutto in un unico messaggio.")
+    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome Account \n- Scrivi tutto in un unico messaggio.", parse_mode='Markdown')
     return NEW_CUSTOMER_DETAILS
 
 async def richiedi_contenuto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,13 +228,16 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Scrivi /start per tornare al menu"""
     await query.edit_message_text(faq_text, parse_mode='Markdown')
 
-# ---------- GESTIONE CONVERSAZIONI ----------
+
+# =========================
+# GESTIONE CONVERSAZIONI
+# =========================
+
 async def list_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['list_name'] = update.message.text
     context.user_data['user_id'] = update.message.from_user.id
-    context.user_data['username'] = update.message.from_user.username
+    context.user_data['username'] = update.message.from_user.username or "unknown"
 
-    # Controlla se siamo nel flusso di richiesta contenuti
     if context.user_data.get('content_request'):
         keyboard = [
             [InlineKeyboardButton(CONTENT_TYPES["movie"], callback_data='movie')],
@@ -279,7 +268,6 @@ async def content_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['content_type'] = content_type
     context.user_data['content_type_name'] = CONTENT_TYPES[content_type]
 
-    # Chiedi i dettagli del contenuto
     examples = {
         "movie": "Es: Matrix (1999)",
         "tvshow": "Es: Stranger Things, Stagione 4",
@@ -311,10 +299,9 @@ async def content_details_handler(update: Update, context: ContextTypes.DEFAULT_
 
     ticket_id = create_ticket(context.user_data, 'content_request')
 
-    # Notifica admin
     admin_msg = (
         f"🚨 NUOVA RICHIESTA CONTENUTO (#{ticket_id})\n"
-        f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+        f"User: @{context.user_data['username']} | ID: {context.user_data['user_id']}\n"
         f"Lista: {context.user_data['list_name']}\n"
         f"Tipo: {context.user_data['content_type_name']}\n"
         f"Dettagli:\n{content_details}\n\n"
@@ -353,7 +340,7 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         admin_msg = (
             f"🚨 NUOVO TICKET DI RINNOVO (#{ticket_id})\n"
-            f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+            f"User: @{context.user_data['username']} | ID: {context.user_data['user_id']}\n"
             f"Lista: {context.user_data['list_name']}\n"
             f"Mesi: {months}\n"
             f"Totale: €{total}\n\n"
@@ -385,14 +372,14 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def new_customer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_details = update.message.text
     context.user_data['user_id'] = update.message.from_user.id
-    context.user_data['username'] = update.message.from_user.username
+    context.user_data['username'] = update.message.from_user.username or "unknown"
     context.user_data['data'] = user_details
 
     ticket_id = create_ticket(context.user_data, 'new_line')
 
     admin_msg = (
         f"🚨 NUOVO TICKET ATTIVAZIONE (#{ticket_id})\n"
-        f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+        f"User: @{context.user_data['username']} | ID: {context.user_data['user_id']}\n"
         f"Dettagli:\n{user_details}\n\n"
         f"📥 Ticket ID: #{ticket_id}"
     )
@@ -410,20 +397,17 @@ async def new_customer_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 async def assistance_details_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     assistance_details = update.message.text
     context.user_data['user_id'] = update.message.from_user.id
-    context.user_data['username'] = update.message.from_user.username
+    context.user_data['username'] = update.message.from_user.username or "unknown"
     context.user_data['data'] = assistance_details
 
-    # Chiedi se vuole allegare un file
     await update.message.reply_text(
         "Vuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato."
     )
     return ATTACHMENT
 
 async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Gestione allegato photo
     attachment_info = ""
     if update.message.photo:
-        # Prendi la foto con la massima risoluzione
         photo_file = update.message.photo[-1]
         context.user_data['attachment'] = photo_file.file_id
         attachment_info = "Allegato: [Screenshot]"
@@ -438,12 +422,11 @@ async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     admin_msg = (
         f"🚨 NUOVO TICKET ASSISTENZA (#{ticket_id})\n"
-        f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+        f"User: @{context.user_data['username']} | ID: {context.user_data['user_id']}\n"
         f"Richiesta:\n{context.user_data['data']}\n"
         f"{attachment_info}\n\n"
         f"📥 Ticket ID: #{ticket_id}"
     )
-    # Invia il messaggio all'admin con l'allegato
     if 'attachment' in context.user_data:
         await context.bot.send_photo(
             ADMIN_CHAT_ID,
@@ -464,12 +447,11 @@ async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 async def skip_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Procedi senza allegato
     ticket_id = create_ticket(context.user_data, 'assistance')
 
     admin_msg = (
         f"🚨 NUOVO TICKET ASSISTENZA (#{ticket_id})\n"
-        f"User: @{update.message.from_user.username} | ID: {update.message.from_user.id}\n"
+        f"User: @{context.user_data['username']} | ID: {context.user_data['user_id']}\n"
         f"Richiesta:\n{context.user_data['data']}\n"
         f"📥 Ticket ID: #{ticket_id}"
     )
@@ -488,9 +470,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Operazione annullata.')
     return ConversationHandler.END
 
-# ---------- COMANDI AMMINISTRATORE ----------
+
+# =========================
+# COMANDI AMMINISTRATORE
+# =========================
+
 async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Usa chat.id per meglio compatibilità con gruppi/canali
     chat_id = getattr(update.effective_chat, "id", None)
     if chat_id != ADMIN_CHAT_ID:
         await update.message.reply_text("Non hai i permessi per eseguire questo comando.")
@@ -531,7 +516,6 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             close_ticket(ticket_id)
             await update.message.reply_text(f"✅ Ticket #{ticket_id} chiuso correttamente!")
 
-            # Notifica all'utente
             try:
                 user_msg = (
                     f"📢 Il tuo ticket #{ticket_id} è stato chiuso!\n\n"
@@ -561,7 +545,6 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         update_service_status(new_status, status_message, admin_name)
 
-        # Invia notifica globale se non operativo
         if new_status != "operational":
             alert_icon = "⚠️" if new_status == "degraded" else "🚨"
             alert_text = {
@@ -640,12 +623,18 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ Ticket non trovato o non di tipo content_request")
 
-# ---------- COMANDI PUBBLICI ----------
+# =========================
+# COMANDI PUBBLICI
+# =========================
+
 async def public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = get_service_status()
     await update.message.reply_text(status_message, parse_mode='Markdown')
 
-# ---------- SETUP APPLICAZIONE ----------
+# =========================
+# SETUP APPLICAZIONE
+# =========================
+
 def main():
     application = ApplicationBuilder().token(TOKEN).build()
 
@@ -677,7 +666,6 @@ def main():
     application.add_handler(CommandHandler('status', public_status))
     application.add_handler(CommandHandler('tickets', admin_commands))
     application.add_handler(CommandHandler('close', admin_commands))
-    # Solo admin può cambiare stato servizio
     application.add_handler(CommandHandler('status', admin_commands, filters=filters.Chat(ADMIN_CHAT_ID)))
     application.add_handler(CommandHandler('statusreport', admin_commands))
     application.add_handler(CommandHandler('addcontent', admin_commands))
