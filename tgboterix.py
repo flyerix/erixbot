@@ -3,6 +3,7 @@ import os
 import sys
 import uuid
 from datetime import datetime
+import asyncio  # <-- aggiunto per job KPI periodici
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -18,6 +19,9 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler,
 )
+
+# ======== INTEGRAZIONE LLM =========
+from llm_utils import llm_query, classify_ticket, suggest_resolution, faq_response, summarize_ticket_history
 
 # =========================
 # CONFIGURAZIONE SICURA
@@ -74,7 +78,15 @@ CONTENT_TYPES = {
 # =========================
 
 def create_ticket(user_data: dict, ticket_type: str) -> str:
-    """Crea un nuovo ticket nel sistema"""
+    """Crea un nuovo ticket nel sistema, auto-classificazione e suggerimenti con LLM"""
+    # --- AUTO-CLASSIFICAZIONE CON LLM ---
+    try:
+        classificazione = classify_ticket(user_data.get('data', ''))
+        logger.info(f"LLM classificazione ticket: {classificazione}")
+    except Exception as e:
+        classificazione = ""
+        logger.error(f"Errore classificazione LLM: {e}")
+
     ticket_id = str(uuid.uuid4())[:8].upper()
     ticket = {
         'id': ticket_id,
@@ -82,6 +94,7 @@ def create_ticket(user_data: dict, ticket_type: str) -> str:
         'username': user_data.get('username') or "unknown",
         'type': ticket_type,
         'data': user_data.get('data', ''),
+        'llm_category': classificazione,   # <-- aggiunto campo LLM
         'status': 'open',
         'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'assigned_to': None,
@@ -143,6 +156,53 @@ def get_service_status():
 
 
 # =========================
+# FUNZIONI KPI E REPORT
+# =========================
+
+def generate_kpi_report():
+    """
+    Genera un report testuale con i principali KPI del bot.
+    """
+    total_tickets = len(tickets_db)
+    closed_tickets = sum(1 for t in tickets_db.values() if t["status"] == "closed")
+    open_count = len(open_tickets)
+    avg_resolution = "-"
+    closed_times = []
+    for t in tickets_db.values():
+        if t.get("closed_at"):
+            created = datetime.strptime(t["created_at"], "%Y-%m-%d %H:%M:%S")
+            closed = datetime.strptime(t["closed_at"], "%Y-%m-%d %H:%M:%S")
+            closed_times.append((closed - created).total_seconds())
+    if closed_times:
+        avg_resolution = f"{int(sum(closed_times)/len(closed_times)//60)} min"
+
+    incidenti = [
+        f"{i['status'].upper()} | {i['start_time'].strftime('%d/%m/%Y %H:%M')} - "
+        f"{(i['end_time'].strftime('%d/%m/%Y %H:%M') if i['end_time'] else 'In corso')}"
+        for i in service_status["incident_history"][-5:]
+    ]
+    incidenti_txt = "\n".join(incidenti) if incidenti else "Nessun incidente recente"
+
+    report = (
+        f"📊 **KPI BOT**\n"
+        f"Ticket Totali: {total_tickets}\n"
+        f"Ticket Aperto: {open_count}\n"
+        f"Ticket Chiusi: {closed_tickets}\n"
+        f"Tempo medio risoluzione: {avg_resolution}\n"
+        f"Incidenti recenti:\n{incidenti_txt}\n"
+    )
+    return report
+
+async def kpi_periodic_job(application):
+    while True:
+        try:
+            report = generate_kpi_report()
+            await application.bot.send_message(ADMIN_CHAT_ID, report)
+        except Exception as e:
+            logger.error(f"Errore invio KPI periodico: {e}")
+        await asyncio.sleep(3600)  # invio ogni ora (modificabile)
+
+# =========================
 # HANDLERS PRINCIPALI
 # =========================
 
@@ -197,6 +257,7 @@ async def assistenza_personalizzata_callback(update: Update, context: ContextTyp
     )
     return ASSISTANCE_DETAILS
 
+# ============ MODIFICATO: FAQ CON LLM ==============
 async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -206,28 +267,21 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 {status_message}
 
----
-
-🛠️ *Problemi di connessione:*
-1. Controlla i cavi di alimentazione
-2. Spegni e riaccendi il dispositivo per 5/10 minuti
-3. Se non dovesse bastare, spegnere il modem/router per 5/10 minuti
-4. Controlla lo stato del servizio con il comando /status
-
-📽️ *Richiesta contenuti:*
-- Puoi richiedere nuovi film/serie ecc.. tramite il menu "🎬 Richiedi Contenuto"
-- I contenuti vengono elaborati e gestiti dal sistema, i tempi sono quindi variabili.
-
-💳 *Pagamenti:*
-- Costo mensile: €15
-- Pagamenti accettati: Crypto, VaV
-
-📦 *Nuove attivazioni:*
-- Tempo di attivazione: Circa 24h
-
-Scrivi /start per tornare al menu"""
+Scrivi qui sotto la tua domanda, oppure scegli tra le domande comuni.
+"""
     await query.edit_message_text(faq_text, parse_mode='Markdown')
+    context.user_data["faq_mode"] = True
+    return CONTENT_DETAILS
 
+async def faq_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("faq_mode"):
+        question = update.message.text
+        answer = faq_response(question)
+        await update.message.reply_text(f"🤖 Risposta automatica:\n{answer}", parse_mode='Markdown')
+        context.user_data.pop("faq_mode", None)
+        return ConversationHandler.END
+    else:
+        return await content_details_handler(update, context)
 
 # =========================
 # GESTIONE CONVERSAZIONI
@@ -484,6 +538,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command = update.message.text.split()[0][1:]
     admin_name = update.message.from_user.first_name
 
+    # SUGGERIMENTO GPT/LLM SU RISPOSTE
     if command == 'tickets':
         if not open_tickets:
             await update.message.reply_text("🔔 Nessun ticket aperto!")
@@ -497,11 +552,17 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'assistance': '🆘',
                 'content_request': '🎬'
             }.get(ticket['type'], '📝')
+            try:
+                suggestion = suggest_resolution(ticket["data"])
+            except Exception as e:
+                suggestion = "(nessun suggerimento LLM)"
+                logger.error(f"Errore suggerimento LLM: {e}")
             response += (
                 f"{ticket_type_emoji} #{ticket_id}\n"
                 f"👤 User: @{ticket['username']} ({ticket['user_id']})\n"
                 f"📝 Tipo: {ticket['type']}\n"
                 f"⏰ Creato: {ticket['created_at']}\n"
+                f"💡 Suggerimento risposta: {suggestion}\n"
                 f"-----------------------------\n"
             )
         await update.message.reply_text(response)
@@ -570,30 +631,16 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Stato servizio aggiornato a: {new_status}\n\nMessaggio: {status_message}")
 
     elif command == 'statusreport':
-        report = "📊 **REPORT STATO SERVIZIO**\n\n"
-        report += f"Stato corrente: {service_status['status']}\n"
-        report += f"Ultimo aggiornamento: {service_status['last_updated'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-        report += f"Messaggio: {service_status['message']}\n\n"
-
-        if service_status["incident_history"]:
-            report += "📜 **STORICO INCIDENTI RECENTI**\n"
-            for incident in service_status["incident_history"][-5:]:
-                start = incident["start_time"].strftime('%d/%m/%Y %H:%M')
-                end = incident["end_time"].strftime('%d/%m/%Y %H:%M') if incident["end_time"] else "In corso"
-                duration = (incident["end_time"] - incident["start_time"]) if incident["end_time"] else (datetime.now() - incident["start_time"])
-                hours = duration.total_seconds() // 3600
-                minutes = (duration.total_seconds() % 3600) // 60
-
-                report += (
-                    f"\n🔹 **{incident['status'].upper()}**\n"
-                    f"⏱️ Durata: {int(hours)}h {int(minutes)}min\n"
-                    f"🕒 Inizio: {start}\n"
-                    f"🕓 Fine: {end}\n"
-                    f"👤 Aggiornato da: {incident['updated_by']}\n"
-                    f"📝 {incident['message']}\n"
-                )
-        else:
-            report += "✅ Nessun incidente recente registrato"
+        # Genera report automatico con LLM
+        tickets_str = "\n".join(
+            f"{t['id']} {t['type']} {t['status']} {t['created_at']} {t.get('closed_at','')}"
+            for t in tickets_db.values()
+        )
+        try:
+            report = summarize_ticket_history(tickets_str)
+        except Exception as e:
+            report = "Errore generazione report LLM"
+            logger.error(f"Errore report LLM: {e}")
         await update.message.reply_text(report, parse_mode='Markdown')
 
     elif command == 'addcontent':
@@ -644,7 +691,8 @@ def main():
             CallbackQueryHandler(nuova_linea_callback, pattern='^nuova_linea$'),
             CallbackQueryHandler(assistenza_personalizzata_callback, pattern='^assistenza_personalizzata$'),
             CallbackQueryHandler(service_status_callback, pattern='^service_status$'),
-            CallbackQueryHandler(richiedi_contenuto_callback, pattern='^richiedi_contenuto$')
+            CallbackQueryHandler(richiedi_contenuto_callback, pattern='^richiedi_contenuto$'),
+            CallbackQueryHandler(faq_callback, pattern='^faq$')
         ],
         states={
             LIST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, list_name_handler)],
@@ -656,7 +704,9 @@ def main():
                 CommandHandler('skip', skip_attachment)
             ],
             CONTENT_TYPE: [CallbackQueryHandler(content_type_handler)],
-            CONTENT_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, content_details_handler)]
+            CONTENT_DETAILS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, faq_text_handler)
+            ]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
         allow_reentry=True
@@ -669,8 +719,11 @@ def main():
     application.add_handler(CommandHandler('status', admin_commands, filters=filters.Chat(ADMIN_CHAT_ID)))
     application.add_handler(CommandHandler('statusreport', admin_commands))
     application.add_handler(CommandHandler('addcontent', admin_commands))
-    application.add_handler(CallbackQueryHandler(faq_callback, pattern='^faq$'))
     application.add_handler(conv_handler)
+
+    # Avvio job per KPI periodici
+    loop = asyncio.get_event_loop()
+    loop.create_task(kpi_periodic_job(application))
 
     logger.info("Erixbot avviato e in polling...")
     application.run_polling()
