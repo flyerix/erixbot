@@ -22,8 +22,8 @@ from telegram.ext import (
 # =========================
 # CONFIGURAZIONE SICURA
 # =========================
-TOKEN = os.environ.get("7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")
-ADMIN_CHAT_ID = os.environ.get("691735614")
+TOKEN = os.environ.get("TGBOTERIX_TOKEN")
+ADMIN_CHAT_ID = os.environ.get("TGBOTERIX_ADMIN_CHAT_ID")
 LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
 LOG_FILENAME = os.environ.get("TGBOTERIX_LOGFILE", "erixbot.log")
 
