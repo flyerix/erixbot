@@ -21,8 +21,7 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 
-# ======== INTEGRAZIONE LLM =========
-from llm_utils import llm_query, classify_ticket, suggest_resolution, faq_response, summarize_ticket_history
+# ========== RIMOSSA INTEGRAZIONE LLM ==========
 
 # =========================
 # CONFIGURAZIONE SICURA
@@ -121,15 +120,7 @@ async def site_status_monitor_job(application):
 # =========================
 
 def create_ticket(user_data: dict, ticket_type: str) -> str:
-    """Crea un nuovo ticket nel sistema, auto-classificazione e suggerimenti con LLM"""
-    # --- AUTO-CLASSIFICAZIONE CON LLM ---
-    try:
-        classificazione = classify_ticket(user_data.get('data', ''))
-        logger.info(f"LLM classificazione ticket: {classificazione}")
-    except Exception as e:
-        classificazione = ""
-        logger.error(f"Errore classificazione LLM: {e}")
-
+    """Crea un nuovo ticket nel sistema"""
     ticket_id = str(uuid.uuid4())[:8].upper()
     ticket = {
         'id': ticket_id,
@@ -137,7 +128,6 @@ def create_ticket(user_data: dict, ticket_type: str) -> str:
         'username': user_data.get('username') or "unknown",
         'type': ticket_type,
         'data': user_data.get('data', ''),
-        'llm_category': classificazione,   # <-- aggiunto campo LLM
         'status': 'open',
         'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         'assigned_to': None,
@@ -299,31 +289,53 @@ async def assistenza_personalizzata_callback(update: Update, context: ContextTyp
     )
     return ASSISTANCE_DETAILS
 
-# ============ MODIFICATO: FAQ CON LLM ==============
+# ============ FAQ STATICHE ==============
+FAQ_LIST = [
+    {
+        "q": "Quanto costa il rinnovo?",
+        "a": "Il rinnovo costa 15€ al mese. Puoi scegliere la durata desiderata."
+    },
+    {
+        "q": "Come posso ricevere assistenza?",
+        "a": "Puoi ricevere assistenza premendo su 'Assistenza Clienti' oppure descrivendo il tuo problema dopo aver selezionato 'Assistenza Personalizzata'."
+    },
+    {
+        "q": "Come funziona la richiesta di contenuti?",
+        "a": "Puoi richiedere film, serie TV, eventi sportivi o altri contenuti tramite la funzione 'Richiedi Contenuto'. Compila tutti i dettagli richiesti!"
+    },
+    {
+        "q": "In quanto tempo viene risolta una richiesta?",
+        "a": "Le richieste vengono generalmente gestite entro poche ore. In caso di problemi tecnici, potresti ricevere aggiornamenti sullo stato del servizio."
+    },
+    {
+        "q": "Come posso pagare?",
+        "a": "Riceverai le istruzioni di pagamento dall'assistenza dopo aver aperto un ticket."
+    },
+]
+
+def get_faq_text():
+    text = "🔍 **F.A.Q. - Domande Frequenti**\n\n"
+    for faq in FAQ_LIST:
+        text += f"• *{faq['q']}*\n   {faq['a']}\n\n"
+    text += "Per altre domande, contatta l'assistenza tramite /start."
+    return text
+
 async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    status_message = get_service_status()
-    faq_text = f"""
-🔍 **F.A.Q. - Domande Frequenti**
-
-{status_message}
-
-Scrivi qui sotto la tua domanda, oppure scegli tra le domande comuni.
-"""
+    faq_text = get_faq_text()
     await query.edit_message_text(faq_text, parse_mode='Markdown')
     context.user_data["faq_mode"] = True
     return CONTENT_DETAILS
 
 async def faq_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("faq_mode"):
-        question = update.message.text
-        answer = faq_response(question)
-        await update.message.reply_text(f"🤖 Risposta automatica:\n{answer}", parse_mode='Markdown')
-        context.user_data.pop("faq_mode", None)
-        return ConversationHandler.END
-    else:
-        return await content_details_handler(update, context)
+    # Risponde solo con le FAQ statiche e invita a contattare l'assistenza
+    await update.message.reply_text(
+        "Le domande più frequenti sono:\n\n" + get_faq_text(),
+        parse_mode='Markdown'
+    )
+    context.user_data.pop("faq_mode", None)
+    return ConversationHandler.END
 
 # =========================
 # GESTIONE CONVERSAZIONI
@@ -579,7 +591,6 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command = update.message.text.split()[0][1:]
     admin_name = update.message.from_user.first_name
 
-    # SUGGERIMENTO GPT/LLM SU RISPOSTE
     if command == 'tickets':
         if not open_tickets:
             await update.message.reply_text("🔔 Nessun ticket aperto!")
@@ -593,11 +604,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'assistance': '🆘',
                 'content_request': '🎬'
             }.get(ticket['type'], '📝')
-            try:
-                suggestion = suggest_resolution(ticket["data"])
-            except Exception as e:
-                suggestion = "(nessun suggerimento LLM)"
-                logger.error(f"Errore suggerimento LLM: {e}")
+            suggestion = "(contatta il cliente per ulteriori dettagli o risolvi manualmente)"
             response += (
                 f"{ticket_type_emoji} #{ticket_id}\n"
                 f"👤 User: @{ticket['username']} ({ticket['user_id']})\n"
@@ -672,16 +679,12 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Stato servizio aggiornato a: {new_status}\n\nMessaggio: {status_message}")
 
     elif command == 'statusreport':
-        # Genera report automatico con LLM
+        # Genera report automatico (ora senza LLM)
         tickets_str = "\n".join(
             f"{t['id']} {t['type']} {t['status']} {t['created_at']} {t.get('closed_at','')}"
             for t in tickets_db.values()
         )
-        try:
-            report = summarize_ticket_history(tickets_str)
-        except Exception as e:
-            report = "Errore generazione report LLM"
-            logger.error(f"Errore report LLM: {e}")
+        report = "Storico ticket:\n\n" + tickets_str if tickets_str else "Nessun ticket registrato."
         await update.message.reply_text(report, parse_mode='Markdown')
 
     elif command == 'addcontent':
