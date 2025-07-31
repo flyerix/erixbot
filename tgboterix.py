@@ -4,6 +4,7 @@ import sys
 import uuid
 from datetime import datetime
 import asyncio  # <-- aggiunto per job KPI periodici
+import requests  # <-- aggiunto per monitor sito
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -72,6 +73,48 @@ CONTENT_TYPES = {
     "other": "❓ Altro"
 }
 
+# =========================
+# MONITORAGGIO SITO
+# =========================
+SITE_URL = "https://miglioriptvreseller.xyz/"
+
+async def site_status_monitor_job(application):
+    while True:
+        try:
+            response = None
+            try:
+                response = requests.get(SITE_URL, timeout=7)
+                latency = response.elapsed.total_seconds()
+            except requests.exceptions.RequestException as e:
+                latency = None
+                response = None
+
+            if response is not None and response.status_code == 200 and latency < 2:
+                # Fast and OK
+                new_status = "operational"
+                msg = "✅ Il sito è online e risponde correttamente."
+            elif response is not None and response.status_code == 200:
+                # Slow but reachable
+                new_status = "degraded"
+                msg = f"⚠️ Il sito risponde lentamente ({latency:.1f}s)."
+            elif response is not None:
+                # Site responds but non-200
+                new_status = "degraded"
+                msg = f"⚠️ Il sito risponde ma con errore HTTP {response.status_code}."
+            else:
+                # Not responding at all
+                new_status = "outage"
+                msg = "🚨 Il sito non risponde."
+
+            # Only update if status changed or it's an outage
+            global service_status
+            if (service_status["status"] != new_status) or (new_status == "outage"):
+                update_service_status(new_status, msg, "monitor bot")
+
+        except Exception as e:
+            logger.error(f"Errore monitoraggio sito: {e}")
+
+        await asyncio.sleep(120)  # check every 2 minutes
 
 # =========================
 # FUNZIONI TICKETING
@@ -153,7 +196,6 @@ def get_service_status():
         f"🕒 Ultimo aggiornamento: {last_updated}\n\n"
         f"ℹ️ Per assistenza: /start"
     )
-
 
 # =========================
 # FUNZIONI KPI E REPORT
@@ -524,7 +566,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Operazione annullata.')
     return ConversationHandler.END
 
-
 # =========================
 # COMANDI AMMINISTRATORE
 # =========================
@@ -721,9 +762,10 @@ def main():
     application.add_handler(CommandHandler('addcontent', admin_commands))
     application.add_handler(conv_handler)
 
-    # Avvio job per KPI periodici
+    # Avvio job per KPI periodici e monitor sito
     loop = asyncio.get_event_loop()
     loop.create_task(kpi_periodic_job(application))
+    loop.create_task(site_status_monitor_job(application))
 
     logger.info("Erixbot avviato e in polling...")
     application.run_polling()
