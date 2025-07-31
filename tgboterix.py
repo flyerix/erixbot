@@ -26,7 +26,7 @@ from telegram.ext import (
 # =========================
 # CONFIGURAZIONE SICURA
 # =========================
-TOKEN = os.environ.get("TGBOTERIX_TOKEN","7571618097:AAFwmnFle6FNZI9pLR_M4_0agkwvBwKkQSQ")
+TOKEN = os.environ.get("TGBOTERIX_TOKEN")
 ADMIN_CHAT_ID = os.environ.get("TGBOTERIX_ADMIN_CHAT_ID","691735614")
 LOGGING = os.environ.get("TGBOTERIX_LOGGING", "true").lower() == "true"
 LOG_FILENAME = os.environ.get("TGBOTERIX_LOGFILE", "erixbot.log")
@@ -38,11 +38,12 @@ ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
 
 # --- CONFIGURAZIONE LOGGING ---
 if LOGGING:
+    from logging.handlers import RotatingFileHandler
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
-    file_handler = logging.FileHandler(LOG_FILENAME, encoding='utf-8')
+    file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=2_000_000, backupCount=2, encoding='utf-8')
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.DEBUG)
     logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, file_handler])
@@ -71,6 +72,22 @@ CONTENT_TYPES = {
     "documentary": "📽️ Documentario",
     "other": "❓ Altro"
 }
+
+# =========================
+# UTILITY UX MIGLIORATA
+# =========================
+
+def get_cancel_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Annulla", callback_data='cancel')]])
+
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("❌ Operazione annullata.")
+    else:
+        await update.message.reply_text('❌ Operazione annullata.')
+    context.user_data.clear()
+    return ConversationHandler.END
 
 # =========================
 # MONITORAGGIO SITO
@@ -108,6 +125,7 @@ async def site_status_monitor_job(application):
             # Only update if status changed or it's an outage
             global service_status
             if (service_status["status"] != new_status) or (new_status == "outage"):
+                await notify_status_to_users(application, new_status, msg)
                 update_service_status(new_status, msg, "monitor bot")
 
         except Exception as e:
@@ -181,11 +199,54 @@ def get_service_status():
     status_text = {"operational": "OPERATIVO", "degraded": "DEGRADATO", "outage": "NON OPERATIVO"}
     last_updated = service_status["last_updated"].strftime("%d/%m/%Y %H:%M:%S")
     return (
-        f"{status_icons[service_status['status']]} **STATO DEL SERVIZIO: {status_text[service_status['status']]}**\n\n"
+        f"{status_icons[service_status['status']]} *STATO DEL SERVIZIO: {status_text[service_status['status']]}*\n\n"
         f"📝 Messaggio:\n{service_status['message']}\n\n"
         f"🕒 Ultimo aggiornamento: {last_updated}\n\n"
         f"ℹ️ Per assistenza: /start"
     )
+
+# =========================
+# NOTIFICHE AUTOMATICHE
+# =========================
+
+async def notify_status_to_users(application, new_status, status_message):
+    # Notifica tutti gli utenti con ticket aperti se cambia stato servizio (eccetto "operational" -> "operational")
+    if new_status in ["degraded", "outage"]:
+        alert_icon = "⚠️" if new_status == "degraded" else "🚨"
+        alert_text = {
+            "degraded": "DEGRADO DEL SERVIZIO",
+            "outage": "INTERRUZIONE DEL SERVIZIO"
+        }
+        alert_message = (
+            f"{alert_icon} *{alert_text[new_status]}*\n\n"
+            f"{status_message}\n\n"
+            f"🕒 Aggiornato: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+            f"🔧 Stiamo lavorando per risolvere il problema"
+        )
+        for ticket in open_tickets.values():
+            try:
+                await application.bot.send_message(
+                    chat_id=ticket['user_id'],
+                    text=alert_message,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"Errore notifica stato servizio: {e}")
+    elif new_status == "operational":
+        # Ripristino servizio: avvisa gli utenti con ticket aperti
+        alert_message = (
+            f"🟢 *Il servizio è di nuovo operativo!*\n\n"
+            "Grazie per la pazienza. Se hai ancora bisogno di assistenza, contatta il supporto."
+        )
+        for ticket in open_tickets.values():
+            try:
+                await application.bot.send_message(
+                    chat_id=ticket['user_id'],
+                    text=alert_message,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"Errore notifica ripristino servizio: {e}")
 
 # =========================
 # FUNZIONI KPI E REPORT
@@ -216,7 +277,7 @@ def generate_kpi_report():
     incidenti_txt = "\n".join(incidenti) if incidenti else "Nessun incidente recente"
 
     report = (
-        f"📊 **KPI BOT**\n"
+        f"📊 *KPI BOT*\n"
         f"Ticket Totali: {total_tickets}\n"
         f"Ticket Aperto: {open_count}\n"
         f"Ticket Chiusi: {closed_tickets}\n"
@@ -249,8 +310,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❓ FAQ", callback_data='faq')]
     ]
     await update.message.reply_text(
-        "Benvenuto/a! Sono Erixbot, come posso aiutarti?\nScegli un'opzione:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "👋 *Benvenuto/a! Sono Erixbot, come posso aiutarti?*\n\nScegli un'opzione:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
     )
 
 async def service_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,20 +324,20 @@ async def service_status_callback(update: Update, context: ContextTypes.DEFAULT_
 async def assistenza_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Per favore inserisci il **nome della lista** associata:", parse_mode='Markdown')
+    await query.edit_message_text("Per favore inserisci il *nome della lista* associata:", parse_mode='Markdown', reply_markup=get_cancel_keyboard())
     return LIST_NAME
 
 async def nuova_linea_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome Account \n- Scrivi tutto in un unico messaggio.", parse_mode='Markdown')
+    await query.edit_message_text("Inviaci i seguenti dettagli:\n- Nome Account \n- Scrivi tutto in un unico messaggio.", parse_mode='Markdown', reply_markup=get_cancel_keyboard())
     return NEW_CUSTOMER_DETAILS
 
 async def richiedi_contenuto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['content_request'] = True
-    await query.edit_message_text("Per favore inserisci il **nome della lista** associata al tuo account:", parse_mode='Markdown')
+    await query.edit_message_text("Per favore inserisci il *nome della lista* associata al tuo account:", parse_mode='Markdown', reply_markup=get_cancel_keyboard())
     return LIST_NAME
 
 async def assistenza_personalizzata_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -285,7 +347,8 @@ async def assistenza_personalizzata_callback(update: Update, context: ContextTyp
     await query.edit_message_text(
         f"{status_message}\n\n"
         "Ti risponderemo il prima possibile, per favore, descrivi il problema:",
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=get_cancel_keyboard()
     )
     return ASSISTANCE_DETAILS
 
@@ -314,9 +377,9 @@ FAQ_LIST = [
 ]
 
 def get_faq_text():
-    text = "🔍 **F.A.Q. - Domande Frequenti**\n\n"
+    text = "🔍 *F.A.Q. - Domande Frequenti*\n\n"
     for faq in FAQ_LIST:
-        text += f"• *{faq['q']}*\n   {faq['a']}\n\n"
+        text += f"• _{faq['q']}_\n   {faq['a']}\n\n"
     text += "Per altre domande, contatta l'assistenza tramite /start."
     return text
 
@@ -324,7 +387,7 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     faq_text = get_faq_text()
-    await query.edit_message_text(faq_text, parse_mode='Markdown')
+    await query.edit_message_text(faq_text, parse_mode='Markdown', reply_markup=get_cancel_keyboard())
     context.user_data["faq_mode"] = True
     return CONTENT_DETAILS
 
@@ -352,16 +415,17 @@ async def list_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(CONTENT_TYPES["tvshow"], callback_data='tvshow')],
             [InlineKeyboardButton(CONTENT_TYPES["sport"], callback_data='sport')],
             [InlineKeyboardButton(CONTENT_TYPES["documentary"], callback_data='documentary')],
-            [InlineKeyboardButton(CONTENT_TYPES["other"], callback_data='other')]
+            [InlineKeyboardButton(CONTENT_TYPES["other"], callback_data='other')],
+            [InlineKeyboardButton("❌ Annulla", callback_data='cancel')]
         ]
         await update.message.reply_text(
-            "Ottimo! Ora seleziona il **tipo di contenuto** che vuoi richiedere:",
+            "Ottimo! Ora seleziona il *tipo di contenuto* che vuoi richiedere:",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
         return CONTENT_TYPE
     else:
-        await update.message.reply_text("Per quante **mensilità** vuoi rinnovare? (Costo: €15/mese)", parse_mode='Markdown')
+        await update.message.reply_text("Per quante *mensilità* vuoi rinnovare? (Costo: €15/mese)", parse_mode='Markdown', reply_markup=get_cancel_keyboard())
         return MONTHS
 
 async def content_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -369,8 +433,10 @@ async def content_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     content_type = query.data
+    if content_type == "cancel":
+        return await cancel_callback(update, context)
     if content_type not in CONTENT_TYPES:
-        await query.edit_message_text("❌ Tipo di contenuto non valido.")
+        await query.edit_message_text("❌ Tipo di contenuto non valido.", reply_markup=get_cancel_keyboard())
         return CONTENT_TYPE
 
     context.user_data['content_type'] = content_type
@@ -385,12 +451,13 @@ async def content_type_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     }
 
     await query.edit_message_text(
-        f"Perfetto! Inserisci i **dettagli del {CONTENT_TYPES[content_type].lower()}** che desideri:\n"
+        f"Perfetto! Inserisci i *dettagli del {CONTENT_TYPES[content_type].lower()}* che desideri:\n"
         f"- Titolo\n"
         f"- Anno (se conosciuto)\n"
         f"- Eventuali note aggiuntive\n\n"
         f"{examples[content_type]}",
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=get_cancel_keyboard()
     )
     return CONTENT_DETAILS
 
@@ -418,13 +485,13 @@ async def content_details_handler(update: Update, context: ContextTypes.DEFAULT_
     await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
     user_msg = (
-        f"✅ **Richiesta registrata!** (#{ticket_id})\n\n"
+        f"✅ *Richiesta registrata!* (#{ticket_id})\n\n"
         f"La tua richiesta per {context.user_data['content_type_name'].lower()} è stata inviata.\n\n"
         f"📝 Dettagli:\n"
         f"- Lista: {context.user_data['list_name']}\n"
         f"- Tipo: {context.user_data['content_type_name']}\n"
         f"- Contenuto: {content_details}\n\n"
-        f"Ti invieremo una notifica quando il contenuto sarà disponibile e/o processato!"
+        f"Ti invieremo una notifica quando il contenuto sarà disponibile e/o processato! 🎬"
     )
     await update.message.reply_text(user_msg, parse_mode='Markdown')
 
@@ -457,24 +524,23 @@ async def months_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
         user_msg = (
-            f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+            f"✅ *Ticket creato!* (#{ticket_id})\n\n"
             "La tua richiesta di rinnovo è stata registrata. "
             "Verrai contattato a breve per completare l'operazione.\n\n"
             f"Riepilogo:\n"
             f"- Lista: {context.user_data['list_name']}\n"
             f"- Mesi: {months}\n"
-            f"- Totale: €{total}"
+            f"- Totale: €{total} 💶"
         )
         await update.message.reply_text(user_msg, parse_mode='Markdown')
-
         return ConversationHandler.END
 
     except ValueError:
-        await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)")
+        await update.message.reply_text("❌ Inserisci un numero valido di mesi (es. 3)", reply_markup=get_cancel_keyboard())
         return MONTHS
     except Exception as e:
         logger.error(f"Errore inaspettato: {e}")
-        await update.message.reply_text("❌ Si è verificato un errore inaspettato.")
+        await update.message.reply_text("❌ Si è verificato un errore inaspettato.", reply_markup=get_cancel_keyboard())
         return MONTHS
 
 async def new_customer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -494,12 +560,12 @@ async def new_customer_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
     user_msg = (
-        f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+        f"✅ *Ticket creato!* (#{ticket_id})\n\n"
         "La tua richiesta di attivazione è stata registrata. "
         "Verrai contattato per completare l'attivazione.\n\n"
         f"Dettagli inviati:\n{user_details}"
     )
-    await update.message.reply_text(user_msg)
+    await update.message.reply_text(user_msg, parse_mode='Markdown')
     return ConversationHandler.END
 
 async def assistance_details_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -509,7 +575,8 @@ async def assistance_details_handler(update: Update, context: ContextTypes.DEFAU
     context.user_data['data'] = assistance_details
 
     await update.message.reply_text(
-        "Vuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato."
+        "Vuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato.",
+        reply_markup=get_cancel_keyboard()
     )
     return ATTACHMENT
 
@@ -523,7 +590,7 @@ async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['attachment'] = update.message.document.file_id
         attachment_info = f"Allegato: {update.message.document.file_name}"
     else:
-        await update.message.reply_text("❌ File non valido. Invia una foto o un documento.")
+        await update.message.reply_text("❌ File non valido. Invia una foto o un documento.", reply_markup=get_cancel_keyboard())
         return ATTACHMENT
 
     ticket_id = create_ticket(context.user_data, 'assistance')
@@ -545,13 +612,13 @@ async def attachment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
     user_msg = (
-        f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+        f"✅ *Ticket creato!* (#{ticket_id})\n\n"
         "La tua richiesta di assistenza è stata registrata. "
         "Verrai contattato al più presto.\n\n"
         f"Dettagli del problema:\n{context.user_data['data']}\n"
         f"{attachment_info}"
     )
-    await update.message.reply_text(user_msg)
+    await update.message.reply_text(user_msg, parse_mode='Markdown')
     return ConversationHandler.END
 
 async def skip_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -566,17 +633,16 @@ async def skip_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(ADMIN_CHAT_ID, admin_msg)
 
     user_msg = (
-        f"✅ **Ticket creato!** (#{ticket_id})\n\n"
+        f"✅ *Ticket creato!* (#{ticket_id})\n\n"
         "La tua richiesta di assistenza è stata registrata. "
         "Verrai contattato al più presto.\n\n"
         f"Dettagli del problema:\n{context.user_data['data']}"
     )
-    await update.message.reply_text(user_msg)
+    await update.message.reply_text(user_msg, parse_mode='Markdown')
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Operazione annullata.')
-    return ConversationHandler.END
+    return await cancel_callback(update, context)
 
 # =========================
 # COMANDI AMMINISTRATORE
@@ -596,7 +662,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔔 Nessun ticket aperto!")
             return
 
-        response = "📬 TICKET APERTI:\n\n"
+        response = "📬 *TICKET APERTI:*\n\n"
         for ticket_id, ticket in open_tickets.items():
             ticket_type_emoji = {
                 'renewal': '🔄',
@@ -613,7 +679,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💡 Suggerimento risposta: {suggestion}\n"
                 f"-----------------------------\n"
             )
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, parse_mode='Markdown')
 
     elif command == 'close':
         if not context.args or len(context.args) < 1:
@@ -653,28 +719,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         update_service_status(new_status, status_message, admin_name)
-
-        if new_status != "operational":
-            alert_icon = "⚠️" if new_status == "degraded" else "🚨"
-            alert_text = {
-                "degraded": "DEGRADO DEL SERVIZIO",
-                "outage": "INTERRUZIONE DEL SERVIZIO"
-            }
-            alert_message = (
-                f"{alert_icon} **{alert_text[new_status]}**\n\n"
-                f"{status_message}\n\n"
-                f"🕒 Aggiornato: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-                f"🔧 Stiamo lavorando per risolvere il problema"
-            )
-            for ticket in open_tickets.values():
-                try:
-                    await context.bot.send_message(
-                        chat_id=ticket['user_id'],
-                        text=alert_message,
-                        parse_mode='Markdown'
-                    )
-                except Exception as e:
-                    logger.error(f"Errore notifica stato servizio: {e}")
+        await notify_status_to_users(context.application, new_status, status_message)
 
         await update.message.reply_text(f"✅ Stato servizio aggiornato a: {new_status}\n\nMessaggio: {status_message}")
 
@@ -697,7 +742,7 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if ticket_id in tickets_db and tickets_db[ticket_id]['type'] == 'content_request':
             user_msg = (
-                f"🎉 **Il contenuto che hai richiesto è stato aggiunto!**\n\n"
+                f"🎉 *Il contenuto che hai richiesto è stato aggiunto!*\n\n"
                 f"Puoi trovarlo nella apposita sezione:\n"
                 f"{content_url}\n\n"
                 f"Grazie per la tua richiesta!"
@@ -736,23 +781,30 @@ def main():
             CallbackQueryHandler(assistenza_personalizzata_callback, pattern='^assistenza_personalizzata$'),
             CallbackQueryHandler(service_status_callback, pattern='^service_status$'),
             CallbackQueryHandler(richiedi_contenuto_callback, pattern='^richiedi_contenuto$'),
-            CallbackQueryHandler(faq_callback, pattern='^faq$')
+            CallbackQueryHandler(faq_callback, pattern='^faq$'),
+            CallbackQueryHandler(cancel_callback, pattern='^cancel$')
         ],
         states={
-            LIST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, list_name_handler)],
-            MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, months_handler)],
-            NEW_CUSTOMER_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, new_customer_handler)],
-            ASSISTANCE_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, assistance_details_handler)],
+            LIST_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, list_name_handler),
+                        CallbackQueryHandler(cancel_callback, pattern='^cancel$')],
+            MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, months_handler),
+                     CallbackQueryHandler(cancel_callback, pattern='^cancel$')],
+            NEW_CUSTOMER_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, new_customer_handler),
+                                   CallbackQueryHandler(cancel_callback, pattern='^cancel$')],
+            ASSISTANCE_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, assistance_details_handler),
+                                 CallbackQueryHandler(cancel_callback, pattern='^cancel$')],
             ATTACHMENT: [
                 MessageHandler(filters.PHOTO | filters.Document.ALL, attachment_handler),
-                CommandHandler('skip', skip_attachment)
+                CommandHandler('skip', skip_attachment),
+                CallbackQueryHandler(cancel_callback, pattern='^cancel$')
             ],
             CONTENT_TYPE: [CallbackQueryHandler(content_type_handler)],
             CONTENT_DETAILS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, faq_text_handler)
+                MessageHandler(filters.TEXT & ~filters.COMMAND, faq_text_handler),
+                CallbackQueryHandler(cancel_callback, pattern='^cancel$')
             ]
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[CommandHandler('cancel', cancel), CallbackQueryHandler(cancel_callback, pattern='^cancel$')],
         allow_reentry=True
     )
 
