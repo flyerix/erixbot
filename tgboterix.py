@@ -3,8 +3,11 @@ import os
 import sys
 import uuid
 from datetime import datetime
-import asyncio  # <-- aggiunto per job KPI periodici
-import requests  # <-- aggiunto per monitor sito
+import asyncio
+import requests
+import threading
+from flask import Flask
+
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -21,7 +24,20 @@ from telegram.ext import (
     CallbackQueryHandler,
 )
 
-# ========== RIMOSSA INTEGRAZIONE LLM ==========
+# ========== INTEGRAZIONE LLM ==========
+import llm_utils  # Assicurati che llm_utils.py sia presente nella stessa directory
+
+# =========================
+# SERVER FLASK KEEPALIVE
+# =========================
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "Erixbot is running!", 200
+
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
 
 # =========================
 # CONFIGURAZIONE SICURA
@@ -73,10 +89,6 @@ CONTENT_TYPES = {
     "other": "❓ Altro"
 }
 
-# =========================
-# UTILITY UX MIGLIORATA
-# =========================
-
 def get_cancel_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Annulla", callback_data='cancel')]])
 
@@ -89,9 +101,6 @@ async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# =========================
-# MONITORAGGIO SITO
-# =========================
 SITE_URL = "https://miglioriptvreseller.xyz/"
 
 async def site_status_monitor_job(application):
@@ -106,23 +115,18 @@ async def site_status_monitor_job(application):
                 response = None
 
             if response is not None and response.status_code == 200 and latency < 2:
-                # Fast and OK
                 new_status = "operational"
                 msg = "✅ Il sito è online e risponde correttamente."
             elif response is not None and response.status_code == 200:
-                # Slow but reachable
                 new_status = "degraded"
                 msg = f"⚠️ Il sito risponde lentamente ({latency:.1f}s)."
             elif response is not None:
-                # Site responds but non-200
                 new_status = "degraded"
                 msg = f"⚠️ Il sito risponde ma con errore HTTP {response.status_code}."
             else:
-                # Not responding at all
                 new_status = "outage"
                 msg = "🚨 Il sito non risponde."
 
-            # Only update if status changed or it's an outage
             global service_status
             if (service_status["status"] != new_status) or (new_status == "outage"):
                 await notify_status_to_users(application, new_status, msg)
@@ -133,12 +137,7 @@ async def site_status_monitor_job(application):
 
         await asyncio.sleep(120)  # check every 2 minutes
 
-# =========================
-# FUNZIONI TICKETING
-# =========================
-
 def create_ticket(user_data: dict, ticket_type: str) -> str:
-    """Crea un nuovo ticket nel sistema"""
     ticket_id = str(uuid.uuid4())[:8].upper()
     ticket = {
         'id': ticket_id,
@@ -157,19 +156,13 @@ def create_ticket(user_data: dict, ticket_type: str) -> str:
     return ticket_id
 
 def close_ticket(ticket_id: str):
-    """Chiude un ticket"""
     if ticket_id in tickets_db:
         tickets_db[ticket_id]['status'] = 'closed'
         tickets_db[ticket_id]['closed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         open_tickets.pop(ticket_id, None)
         logger.info(f"Ticket chiuso: {ticket_id}")
 
-# =========================
-# GESTIONE STATO SERVIZIO
-# =========================
-
 def update_service_status(new_status: str, message: str, admin: str):
-    """Aggiorna lo stato del servizio e tiene traccia della storia"""
     global service_status
 
     if new_status != "operational":
@@ -194,7 +187,6 @@ def update_service_status(new_status: str, message: str, admin: str):
     return service_status
 
 def get_service_status():
-    """Restituisce lo stato corrente del servizio formattato"""
     status_icons = {"operational": "🟢", "degraded": "🟡", "outage": "🔴"}
     status_text = {"operational": "OPERATIVO", "degraded": "DEGRADATO", "outage": "NON OPERATIVO"}
     last_updated = service_status["last_updated"].strftime("%d/%m/%Y %H:%M:%S")
@@ -205,12 +197,7 @@ def get_service_status():
         f"ℹ️ Per assistenza: /start"
     )
 
-# =========================
-# NOTIFICHE AUTOMATICHE
-# =========================
-
 async def notify_status_to_users(application, new_status, status_message):
-    # Notifica tutti gli utenti con ticket aperti se cambia stato servizio (eccetto "operational" -> "operational")
     if new_status in ["degraded", "outage"]:
         alert_icon = "⚠️" if new_status == "degraded" else "🚨"
         alert_text = {
@@ -233,7 +220,6 @@ async def notify_status_to_users(application, new_status, status_message):
             except Exception as e:
                 logger.error(f"Errore notifica stato servizio: {e}")
     elif new_status == "operational":
-        # Ripristino servizio: avvisa gli utenti con ticket aperti
         alert_message = (
             f"🟢 *Il servizio è di nuovo operativo!*\n\n"
             "Grazie per la pazienza. Se hai ancora bisogno di assistenza, contatta il supporto."
@@ -248,14 +234,7 @@ async def notify_status_to_users(application, new_status, status_message):
             except Exception as e:
                 logger.error(f"Errore notifica ripristino servizio: {e}")
 
-# =========================
-# FUNZIONI KPI E REPORT
-# =========================
-
 def generate_kpi_report():
-    """
-    Genera un report testuale con i principali KPI del bot.
-    """
     total_tickets = len(tickets_db)
     closed_tickets = sum(1 for t in tickets_db.values() if t["status"] == "closed")
     open_count = len(open_tickets)
@@ -295,9 +274,7 @@ async def kpi_periodic_job(application):
             logger.error(f"Errore invio KPI periodico: {e}")
         await asyncio.sleep(3600)  # invio ogni ora (modificabile)
 
-# =========================
-# HANDLERS PRINCIPALI
-# =========================
+# ========== HANDLERS PRINCIPALI ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/start richiesto da user_id={update.effective_user.id}")
@@ -352,7 +329,8 @@ async def assistenza_personalizzata_callback(update: Update, context: ContextTyp
     )
     return ASSISTANCE_DETAILS
 
-# ============ FAQ STATICHE ==============
+# ========== FAQ STATICHE ==========
+
 FAQ_LIST = [
     {
         "q": "Quanto costa il rinnovo?",
@@ -392,17 +370,18 @@ async def faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONTENT_DETAILS
 
 async def faq_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Risponde solo con le FAQ statiche e invita a contattare l'assistenza
+    # RISPOSTA AUTOMATICA LLM (oltre alle statiche)
+    question = update.message.text
+    llm_answer = llm_utils.faq_response(question)
+    faq_text = get_faq_text()
     await update.message.reply_text(
-        "Le domande più frequenti sono:\n\n" + get_faq_text(),
+        f"Risposta automatica:\n{llm_answer}\n\nLe domande più frequenti sono:\n\n{faq_text}",
         parse_mode='Markdown'
     )
     context.user_data.pop("faq_mode", None)
     return ConversationHandler.END
 
-# =========================
-# GESTIONE CONVERSAZIONI
-# =========================
+# ========== GESTIONE CONVERSAZIONI ==========
 
 async def list_name_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['list_name'] = update.message.text
@@ -574,8 +553,10 @@ async def assistance_details_handler(update: Update, context: ContextTypes.DEFAU
     context.user_data['username'] = update.message.from_user.username or "unknown"
     context.user_data['data'] = assistance_details
 
+    # RISPOSTA AUTOMATICA LLM SU ASSISTENZA
+    llm_suggest = llm_utils.suggest_resolution(assistance_details)
     await update.message.reply_text(
-        "Vuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato.",
+        f"Risposta automatica:\n{llm_suggest}\n\nVuoi allegare uno screenshot o un file per aiutare l'assistenza? Invia ora il file oppure scrivi /skip per continuare senza allegato.",
         reply_markup=get_cancel_keyboard()
     )
     return ATTACHMENT
@@ -643,10 +624,6 @@ async def skip_attachment(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await cancel_callback(update, context)
-
-# =========================
-# COMANDI AMMINISTRATORE
-# =========================
 
 async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = getattr(update.effective_chat, "id", None)
@@ -724,13 +701,14 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Stato servizio aggiornato a: {new_status}\n\nMessaggio: {status_message}")
 
     elif command == 'statusreport':
-        # Genera report automatico (ora senza LLM)
         tickets_str = "\n".join(
             f"{t['id']} {t['type']} {t['status']} {t['created_at']} {t.get('closed_at','')}"
             for t in tickets_db.values()
         )
         report = "Storico ticket:\n\n" + tickets_str if tickets_str else "Nessun ticket registrato."
-        await update.message.reply_text(report, parse_mode='Markdown')
+        # RISPOSTA LLM SINTESI
+        llm_report = llm_utils.summarize_ticket_history(tickets_str)
+        await update.message.reply_text(f"{report}\n\nSintesi automatica:\n{llm_report}", parse_mode='Markdown')
 
     elif command == 'addcontent':
         if not context.args or len(context.args) < 2:
@@ -759,19 +737,14 @@ async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ Ticket non trovato o non di tipo content_request")
 
-# =========================
-# COMANDI PUBBLICI
-# =========================
-
 async def public_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_message = get_service_status()
     await update.message.reply_text(status_message, parse_mode='Markdown')
 
-# =========================
-# SETUP APPLICAZIONE
-# =========================
-
 def main():
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
     application = ApplicationBuilder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -817,7 +790,6 @@ def main():
     application.add_handler(CommandHandler('addcontent', admin_commands))
     application.add_handler(conv_handler)
 
-    # Avvio job per KPI periodici e monitor sito
     loop = asyncio.get_event_loop()
     loop.create_task(kpi_periodic_job(application))
     loop.create_task(site_status_monitor_job(application))
