@@ -6,7 +6,6 @@ from datetime import datetime
 import asyncio  # <-- aggiunto per job KPI periodici
 import requests  # <-- aggiunto per monitor sito
 from telegram import (
-    Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardRemove,
