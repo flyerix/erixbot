@@ -6,6 +6,7 @@ const TOKEN = process.env.TELEGRAM_TOKEN;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const bot = new TelegramBot(TOKEN, { polling: true });
 const BASE_TIMEZONE = 'Europe/Rome';
+const ADMIN_ID = 691735614;
 
 // ===== UTILS =====
 function loadData() {
@@ -48,18 +49,22 @@ Usa /help per vedere i comandi disponibili.`);
 
 bot.onText(/^\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, `🧭 Comandi:
-/add Nome 9.99 EUR 2025-10-31 [note] — aggiungi un abbonamento
-/list — elenca i tuoi abbonamenti
+/add Nome 9.99 EUR 2025-10-31 [note] — aggiungi un abbonamento (solo admin)
+/list — elenca i tuoi abbonamenti (solo admin)
 /info — vedi info dettagliate di un tuo abbonamento
-/renew Nome 2026-01-31 — rinnova (aggiorna la scadenza)
-/cancel Nome — elimina l'abbonamento
-/next — mostra le scadenze nei prossimi 30 giorni
+/renew Nome 2026-01-31 — rinnova (aggiorna la scadenza) (solo admin)
+/cancel Nome — elimina l'abbonamento (solo admin)
+/next — mostra le scadenze nei prossimi 30 giorni (solo admin)
 
 Formato data: AAAA-MM-GG. Valuta consigliata: EUR.`);
 });
 
-// /list (solo propri abbonamenti)
+// /list (solo admin)
 bot.onText(/^\/list/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+    return;
+  }
   const userId = msg.from.id;
   const data = loadData().filter(x => x.userId === userId);
   if (!data.length) {
@@ -117,8 +122,12 @@ Aggiunto il: ${r.createdAt.substring(0,10)}`, { parse_mode: 'HTML' });
   }
 });
 
-// Gli altri comandi rimangono invariati (add, renew, cancel, next)
+// /add (solo admin)
 bot.onText(/^\/add (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+    return;
+  }
   const args = match[1].split(' ').filter(Boolean);
   if (args.length < 4) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /add Nome 9.99 EUR 2025-10-31 [note]`);
@@ -154,7 +163,12 @@ Scadenza: ${dateISO}
 ${note ? 'Note: ' + note : ''}`, { parse_mode: 'HTML' });
 });
 
+// /renew (solo admin)
 bot.onText(/^\/renew (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+    return;
+  }
   const args = match[1].split(' ').filter(Boolean);
   if (args.length < 2) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /renew Nome 2026-01-31`);
@@ -185,7 +199,12 @@ bot.onText(/^\/renew (.+)/, (msg, match) => {
     { parse_mode: 'HTML' });
 });
 
+// /cancel (solo admin)
 bot.onText(/^\/cancel (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+    return;
+  }
   const name = match[1].trim();
   if (!name) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /cancel Nome`);
@@ -202,7 +221,12 @@ bot.onText(/^\/cancel (.+)/, (msg, match) => {
       : `❌ Abbonamento <b>${name}</b> non trovato.`, { parse_mode: 'HTML' });
 });
 
+// /next (solo admin)
 bot.onText(/^\/next/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+    return;
+  }
   const userId = msg.from.id;
   const data = loadData().filter(x => x.userId === userId);
   const cutoff = new Date();
