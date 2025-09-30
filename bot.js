@@ -2,7 +2,6 @@ const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
 
-// ===== CONFIG =====
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const bot = new TelegramBot(TOKEN, { polling: true });
@@ -36,6 +35,9 @@ function formatEuro(amount) {
   return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 }
 
+// ===== STATE FOR INFO REQUEST =====
+const userStates = {};
+
 // ===== BOT LOGIC =====
 bot.onText(/^\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `👋 Benvenuto!
@@ -48,6 +50,7 @@ bot.onText(/^\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, `🧭 Comandi:
 /add Nome 9.99 EUR 2025-10-31 [note] — aggiungi un abbonamento
 /list — elenca i tuoi abbonamenti
+/info — vedi info dettagliate di un tuo abbonamento
 /renew Nome 2026-01-31 — rinnova (aggiorna la scadenza)
 /cancel Nome — elimina l'abbonamento
 /next — mostra le scadenze nei prossimi 30 giorni
@@ -55,8 +58,67 @@ bot.onText(/^\/help/, (msg) => {
 Formato data: AAAA-MM-GG. Valuta consigliata: EUR.`);
 });
 
+// /list (solo propri abbonamenti)
+bot.onText(/^\/list/, (msg) => {
+  const userId = msg.from.id;
+  const data = loadData().filter(x => x.userId === userId);
+  if (!data.length) {
+    bot.sendMessage(msg.chat.id, `🗂 Nessun abbonamento registrato. Usa /add per aggiungerne uno.`);
+    return;
+  }
+  const out = data.map(r => {
+    let days = 0;
+    try {
+      const d = parseDateISO(r.dateISO);
+      days = Math.ceil((d - new Date()) / (1000*60*60*24));
+    } catch { days = '?'; }
+    const status = days < 0 ? '⛔ Scaduto' : days <= 7 ? '⚠ In scadenza' : '✅ Attivo';
+    return `• <b>${r.name}</b> — ${formatEuro(r.cost)} ${r.currency} — scade il ${r.dateISO} — ${status}${r.note ? ' — ' + r.note : ''}`;
+  }).join('\n');
+  bot.sendMessage(msg.chat.id, out, { parse_mode: 'HTML' });
+});
+
+// ====== NUOVO COMANDO: /info ======
+bot.onText(/^\/info$/, (msg) => {
+  userStates[msg.from.id] = { awaitingInfo: true };
+  bot.sendMessage(msg.chat.id, `✏️ Scrivi il nome dell'abbonamento di cui vuoi vedere le informazioni (come hai inserito con /add):`);
+});
+
+// ====== Gestione risposta al comando /info ======
+bot.on('message', (msg) => {
+  // Se non siamo in attesa, ignora
+  if (userStates[msg.from.id] && userStates[msg.from.id].awaitingInfo) {
+    const abboName = msg.text.trim();
+    const userId = msg.from.id;
+    const data = loadData().filter(x => x.userId === userId && x.name.toLowerCase() === abboName.toLowerCase());
+
+    if (!data.length) {
+      bot.sendMessage(msg.chat.id, `❌ Nessun abbonamento trovato con nome "<b>${abboName}</b>". Ricorda di scriverlo esattamente come in /add!`, { parse_mode: 'HTML' });
+    } else {
+      // Mostra info dettagliate (anche più di uno se omonimi)
+      data.forEach(r => {
+        bot.sendMessage(msg.chat.id, `🔎 <b>${r.name}</b>
+Costo: ${formatEuro(r.cost)} ${r.currency}
+Scadenza: ${r.dateISO}
+${r.note ? 'Note: ' + r.note : ''}
+Aggiunto il: ${r.createdAt.substring(0,10)}`, { parse_mode: 'HTML' });
+      });
+    }
+    // Reset stato
+    delete userStates[msg.from.id];
+    return;
+  }
+
+  // Messaggi di default
+  if (!msg.text.startsWith('/')) return;
+  const known = ['/start','/help','/add','/list','/renew','/cancel','/next','/info'];
+  if (!known.some(cmd => msg.text.startsWith(cmd))) {
+    bot.sendMessage(msg.chat.id, `❓ Comando non riconosciuto. Usa /help.`);
+  }
+});
+
+// Gli altri comandi rimangono invariati (add, renew, cancel, next)
 bot.onText(/^\/add (.+)/, (msg, match) => {
-  // /add Nome 9.99 EUR 2025-10-31 [note]
   const args = match[1].split(' ').filter(Boolean);
   if (args.length < 4) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /add Nome 9.99 EUR 2025-10-31 [note]`);
@@ -92,27 +154,7 @@ Scadenza: ${dateISO}
 ${note ? 'Note: ' + note : ''}`, { parse_mode: 'HTML' });
 });
 
-bot.onText(/^\/list/, (msg) => {
-  const userId = msg.from.id;
-  const data = loadData().filter(x => x.userId === userId);
-  if (!data.length) {
-    bot.sendMessage(msg.chat.id, `🗂 Nessun abbonamento registrato. Usa /add per aggiungerne uno.`);
-    return;
-  }
-  const out = data.map(r => {
-    let days = 0;
-    try {
-      const d = parseDateISO(r.dateISO);
-      days = Math.ceil((d - new Date()) / (1000*60*60*24));
-    } catch { days = '?'; }
-    const status = days < 0 ? '⛔ Scaduto' : days <= 7 ? '⚠ In scadenza' : '✅ Attivo';
-    return `• <b>${r.name}</b> — ${formatEuro(r.cost)} ${r.currency} — scade il ${r.dateISO} — ${status}${r.note ? ' — ' + r.note : ''}`;
-  }).join('\n');
-  bot.sendMessage(msg.chat.id, out, { parse_mode: 'HTML' });
-});
-
 bot.onText(/^\/renew (.+)/, (msg, match) => {
-  // /renew Nome 2026-01-31
   const args = match[1].split(' ').filter(Boolean);
   if (args.length < 2) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /renew Nome 2026-01-31`);
@@ -144,7 +186,6 @@ bot.onText(/^\/renew (.+)/, (msg, match) => {
 });
 
 bot.onText(/^\/cancel (.+)/, (msg, match) => {
-  // /cancel Nome
   const name = match[1].trim();
   if (!name) {
     bot.sendMessage(msg.chat.id, `❗ Usa: /cancel Nome`);
@@ -162,7 +203,6 @@ bot.onText(/^\/cancel (.+)/, (msg, match) => {
 });
 
 bot.onText(/^\/next/, (msg) => {
-  // mostra le prossime scadenze (30 giorni)
   const userId = msg.from.id;
   const data = loadData().filter(x => x.userId === userId);
   const cutoff = new Date();
@@ -190,17 +230,7 @@ bot.onText(/^\/next/, (msg) => {
   bot.sendMessage(msg.chat.id, `⏰ Scadenze prossime:\n${out}`, { parse_mode: 'HTML' });
 });
 
-// Messaggio di default per comandi sconosciuti
-bot.on('message', (msg) => {
-  if (!msg.text.startsWith('/')) return;
-  const known = ['/start','/help','/add','/list','/renew','/cancel','/next'];
-  if (!known.some(cmd => msg.text.startsWith(cmd))) {
-    bot.sendMessage(msg.chat.id, `❓ Comando non riconosciuto. Usa /help.`);
-  }
-});
-
-// ========== Reminder Giornaliero (manuale) ==========
-// Puoi richiamare questa funzione da uno script pianificato su Railway
+// Reminder giornaliero e export invariato
 function dailyReminders() {
   const data = loadData();
   const today = new Date();
@@ -226,5 +256,4 @@ function dailyReminders() {
   });
 }
 
-// Esporta la funzione per poterla richiamare da uno script esterno
 module.exports = { dailyReminders };
