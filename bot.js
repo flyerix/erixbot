@@ -89,7 +89,7 @@ bot.onText(/^\/start/, (msg) => {
   const tag = getAdminTag(msg);
   bot.sendMessage(
     msg.chat.id,
-    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>AbboBot</b> 🤖\nGestisco i tuoi abbonamenti in modo semplice e colorato!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
+    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nIo sono <b>ErixBot</b> 🤖\nSono qui per aiutarti!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
     { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" }
   );
 });
