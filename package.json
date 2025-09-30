@@ -1,0 +1,12 @@
+{
+  "name": "telegram-subscription-bot",
+  "version": "1.0.0",
+  "description": "Bottamat",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.61.0"
+  }
+}
