@@ -1,28 +1,34 @@
 const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
+const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch'); // Assicurati di installare: npm install node-fetch@2
+const fetch = require('node-fetch'); // npm install node-fetch@2
 
+// === CONFIG ===
 const TOKEN = process.env.TELEGRAM_TOKEN;
-const DATA_FILE = path.join(__dirname, 'data.json');
-const bot = new TelegramBot(TOKEN, { polling: true });
-const BASE_TIMEZONE = 'Europe/Rome';
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // Es: "https://tuoapp.onrender.com"
+const PORT = process.env.PORT || 3000;
 const ADMIN_ID = 691735614;
+const DATA_FILE = path.join(__dirname, 'data.json');
+const BASE_TIMEZONE = 'Europe/Rome';
 
-// ===== UTILS =====
+// === BOT SETUP ===
+const bot = new TelegramBot(TOKEN, { webHook: true });
+const app = express();
+app.use(bodyParser.json());
+
+// === UTILS ===
 function loadData() {
   if (!fs.existsSync(DATA_FILE)) return [];
   return JSON.parse(fs.readFileSync(DATA_FILE));
 }
-
 function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
-
 function nowISO() {
   return new Date().toISOString();
 }
-
 function parseDateISO(str) {
   const parts = str.trim().split('-');
   if (parts.length !== 3) throw new Error('Data non valida, usa AAAA-MM-GG');
@@ -30,24 +36,17 @@ function parseDateISO(str) {
   if (isNaN(d.getTime())) throw new Error('Data non valida, usa AAAA-MM-GG');
   return d;
 }
-
 function formatEuro(amount) {
   const n = Number(amount);
   if (isNaN(n)) return String(amount);
   return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 }
-
 function isAdmin(msg) {
   return msg.from && msg.from.id === ADMIN_ID;
 }
-
-// ===== STATE FOR INFO REQUEST =====
-const userStates = {};
-
 function getAdminTag(msg) {
   return isAdmin(msg) ? "👑 [ADMIN] " : "";
 }
-
 function mainMenu(isAdminUser = false) {
   const buttons = [];
   if (isAdminUser) {
@@ -77,12 +76,20 @@ function mainMenu(isAdminUser = false) {
   };
 }
 
-// ====== START / MAIN MENU ======
+// === WEBHOOK EXPRESS HANDLER ===
+app.post('/', (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// === BOT LOGIC ===
+const userStates = {};
+
 bot.onText(/^\/start/, (msg) => {
   const tag = getAdminTag(msg);
   bot.sendMessage(
     msg.chat.id,
-    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>ErixBot</b> 🤖\nControlla le mie opzioni, sono qui per aiutare!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
+    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>AbboBot</b> 🤖\nGestisco i tuoi abbonamenti in modo semplice e colorato!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
     { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" }
   );
 });
@@ -106,7 +113,6 @@ bot.onText(/^\/help/, (msg) => {
   );
 });
 
-// ====== STATUS ======
 bot.onText(/^\/status/, async (msg) => {
   const tag = getAdminTag(msg);
   const status = await checkServiceStatus();
@@ -119,17 +125,10 @@ bot.onText(/^\/status/, async (msg) => {
   }
 });
 
-/**
- * Funzione /status aggiornata:
- * - Usa node-fetch
- * - Considera ONLINE se la pagina contiene almeno una parola chiave tipica
- * - Considera OFFLINE se non trova parole chiave o errori
- */
 async function checkServiceStatus() {
   try {
     const res = await fetch("https://miglioriptvreseller.xyz/", { timeout: 5000 });
     const body = await res.text();
-    // Cerca parole chiave che indicano la presenza di servizio
     if (
       res.status === 200 &&
       /iptv|reseller|login|username|abbonamento|dashboard|accesso|servizio/i.test(body)
@@ -143,7 +142,7 @@ async function checkServiceStatus() {
   }
 }
 
-// ====== CALLBACK QUERY HANDLER (bottoni) ======
+// === CALLBACK QUERY HANDLER (bottoni) ===
 bot.on('callback_query', async query => {
   const msg = query.message;
   const userId = query.from.id;
@@ -221,7 +220,7 @@ bot.on('callback_query', async query => {
   bot.answerCallbackQuery(query.id);
 });
 
-// ====== GESTIONE RISPOSTE UTENTE PER STATI ======
+// === GESTIONE RISPOSTE UTENTE PER STATI ===
 bot.on('message', (msg) => {
   const userId = msg.from.id;
   const tag = getAdminTag(msg);
@@ -362,7 +361,7 @@ ${r.note ? '📝 Note: ' + r.note : ''}
   }
 });
 
-// ====== ADMIN-ONLY COMMANDS ======
+// === ADMIN-ONLY COMMANDS ===
 function sendList(msg, userId, tag) {
   const data = loadData().filter(x => x.userId === userId);
   if (!data.length) {
@@ -408,30 +407,9 @@ function sendNext(msg, userId, tag) {
   bot.sendMessage(msg.chat.id, `${tag}⏳ <b>Scadenze prossime:</b>\n${out}`, { parse_mode: 'HTML', ...mainMenu(true) });
 }
 
-// Reminder giornaliero e export invariato
-function dailyReminders() {
-  const data = loadData();
-  const today = new Date();
-  const usersToNotif = {};
+// === WEBHOOK SETUP ===
+bot.setWebHook(`${WEBHOOK_URL}`);
 
-  data.forEach(r => {
-    let daysLeft = 0;
-    try {
-      const d = parseDateISO(r.dateISO);
-      daysLeft = Math.ceil((d - today) / (1000*60*60*24));
-    } catch { return; }
-    if ([7,3,1,0].includes(daysLeft)) {
-      if (!usersToNotif[r.userId]) usersToNotif[r.userId] = [];
-      usersToNotif[r.userId].push({ ...r, daysLeft });
-    }
-  });
-
-  Object.keys(usersToNotif).forEach(uid => {
-    const msg = usersToNotif[uid].map(x =>
-      `• <b>${x.name}</b> — ${formatEuro(x.cost)} ${x.currency} — scade il ${x.dateISO} (in ${x.daysLeft} giorni)`
-    ).join('\n');
-    bot.sendMessage(uid, `🔔 <b>Promemoria scadenze:</b>\n${msg}`, { parse_mode: 'HTML' });
-  });
-}
-
-module.exports = { dailyReminders };
+app.listen(PORT, () => {
+  console.log(`Bot server listening on port ${PORT}`);
+});
