@@ -1,6 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -24,9 +25,9 @@ function nowISO() {
 
 function parseDateISO(str) {
   const parts = str.trim().split('-');
-  if (parts.length !== 3) throw new Error('Data non valida, usa AAAA-MM-GG');
+  if (parts.length !== 3) throw new Error('📅 Data non valida! Usa il formato AAAA-MM-GG');
   const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  if (isNaN(d.getTime())) throw new Error('Data non valida, usa AAAA-MM-GG');
+  if (isNaN(d.getTime())) throw new Error('📅 Data non valida! Usa il formato AAAA-MM-GG');
   return d;
 }
 
@@ -36,39 +37,327 @@ function formatEuro(amount) {
   return n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 }
 
+function isAdmin(msg) {
+  return msg.from && msg.from.id === ADMIN_ID;
+}
+
 // ===== STATE FOR INFO REQUEST =====
 const userStates = {};
 
-// ===== BOT LOGIC =====
-bot.onText(/^\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, `👋 Benvenuto!
-Questo bot tiene traccia dei tuoi abbonamenti: costi, scadenze e rinnovi.
+// ===== KEYBOARD OPTIONS =====
+function mainMenu(isAdminUser = false) {
+  const buttons = [];
+  if (isAdminUser) {
+    buttons.push([
+      { text: "➕ Aggiungi", callback_data: "add" },
+      { text: "📖 Lista", callback_data: "list" }
+    ]);
+    buttons.push([
+      { text: "🔁 Rinnova", callback_data: "renew" },
+      { text: "🗑 Elimina", callback_data: "cancel" }
+    ]);
+    buttons.push([
+      { text: "⏳ Scadenze", callback_data: "next" }
+    ]);
+  }
+  buttons.push([
+    { text: "🔎 Info abbonamento", callback_data: "info" },
+    { text: "🛰 Stato servizio", callback_data: "status" }
+  ]);
+  buttons.push([
+    { text: "❓ Aiuto", callback_data: "help" }
+  ]);
+  return {
+    reply_markup: {
+      inline_keyboard: buttons
+    }
+  };
+}
 
-Usa /help per vedere i comandi disponibili.`);
+// ====== START / MAIN MENU ======
+function getAdminTag(msg) {
+  return isAdmin(msg) ? "👑 [ADMIN] " : "";
+}
+
+bot.onText(/^\/start/, (msg) => {
+  const tag = getAdminTag(msg);
+  bot.sendMessage(
+    msg.chat.id,
+    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>AbboBot</b> 🤖\nGestisco i tuoi abbonamenti in modo semplice e colorato!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
+    { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" }
+  );
 });
 
 bot.onText(/^\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, `🧭 Comandi:
-/add Nome 9.99 EUR 2025-10-31 [note] — aggiungi un abbonamento (solo admin)
-/list — elenca i tuoi abbonamenti (solo admin)
-/info — vedi info dettagliate di un tuo abbonamento
-/renew Nome 2026-01-31 — rinnova (aggiorna la scadenza) (solo admin)
-/cancel Nome — elimina l'abbonamento (solo admin)
-/next — mostra le scadenze nei prossimi 30 giorni (solo admin)
+  const tag = getAdminTag(msg);
+  bot.sendMessage(
+    msg.chat.id,
+    `${tag}❓ <b>Ecco cosa posso fare:</b>
+➕ <b>Aggiungi</b> — Inserisci un nuovo abbonamento
+📖 <b>Lista</b> — Visualizza i tuoi abbonamenti
+🔁 <b>Rinnova</b> — Aggiorna la scadenza
+🗑 <b>Elimina</b> — Cancella un abbonamento
+⏳ <b>Scadenze</b> — Vedi le scadenze in arrivo
+🔎 <b>Info abbonamento</b> — Dettagli di uno specifico abbonamento
+🛰 <b>Stato servizio</b> — Stato IPTV
+❓ <b>Aiuto</b> — Spiega i comandi
 
-Formato data: AAAA-MM-GG. Valuta consigliata: EUR.`);
+<b>Tip:</b> Usa la tastiera qui sotto per scegliere più velocemente!`,
+    { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" }
+  );
 });
 
-// /list (solo admin)
-bot.onText(/^\/list/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
+// ====== STATUS ======
+bot.onText(/^\/status/, (msg) => {
+  const tag = getAdminTag(msg);
+  checkServiceStatus().then(status => {
+    if (status === "ONLINE") {
+      bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
+    } else {
+      bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
+    }
+  }).catch(() => {
+    bot.sendMessage(msg.chat.id, `${tag}⚠️ Impossibile verificare lo stato del servizio.`, { parse_mode: "HTML" });
+  });
+});
+
+function checkServiceStatus() {
+  return new Promise((resolve, reject) => {
+    https.get("https://miglioriptvreseller.xyz/", (res) => {
+      if (res.statusCode === 200) {
+        resolve("ONLINE");
+      } else {
+        resolve("OFFLINE");
+      }
+    }).on('error', () => {
+      resolve("OFFLINE");
+    });
+  });
+}
+
+// ====== CALLBACK QUERY HANDLER (bottoni) ======
+bot.on('callback_query', async query => {
+  const msg = query.message;
+  const userId = query.from.id;
+  const tag = getAdminTag(query);
+
+  switch (query.data) {
+    case "add":
+      if (!isAdmin(query)) {
+        bot.answerCallbackQuery(query.id, { text: "⛔ Solo l'amministratore!", show_alert: true });
+        return;
+      }
+      userStates[userId] = { awaitingAdd: true };
+      bot.sendMessage(msg.chat.id, `${tag}➕ <b>Scrivi i dati per aggiungere:</b>\n<code>Nome 9.99 EUR 2025-10-31 [note]</code>`, { parse_mode: "HTML" });
+      break;
+    case "list":
+      if (!isAdmin(query)) {
+        bot.answerCallbackQuery(query.id, { text: "⛔ Solo l'amministratore!", show_alert: true });
+        return;
+      }
+      sendList(msg, userId, tag);
+      break;
+    case "renew":
+      if (!isAdmin(query)) {
+        bot.answerCallbackQuery(query.id, { text: "⛔ Solo l'amministratore!", show_alert: true });
+        return;
+      }
+      userStates[userId] = { awaitingRenew: true };
+      bot.sendMessage(msg.chat.id, `${tag}🔁 <b>Scrivi:</b>\n<code>Nome 2026-01-31</code>`, { parse_mode: "HTML" });
+      break;
+    case "cancel":
+      if (!isAdmin(query)) {
+        bot.answerCallbackQuery(query.id, { text: "⛔ Solo l'amministratore!", show_alert: true });
+        return;
+      }
+      userStates[userId] = { awaitingCancel: true };
+      bot.sendMessage(msg.chat.id, `${tag}🗑 <b>Scrivi il nome dell'abbonamento da eliminare:</b>`, { parse_mode: "HTML" });
+      break;
+    case "next":
+      if (!isAdmin(query)) {
+        bot.answerCallbackQuery(query.id, { text: "⛔ Solo l'amministratore!", show_alert: true });
+        return;
+      }
+      sendNext(msg, userId, tag);
+      break;
+    case "info":
+      userStates[userId] = { awaitingInfo: true };
+      bot.sendMessage(msg.chat.id, `${tag}🔎 <b>Scrivi il nome dell'abbonamento di cui vuoi vedere le info:</b>`, { parse_mode: "HTML" });
+      break;
+    case "status":
+      checkServiceStatus().then(status => {
+        if (status === "ONLINE") {
+          bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
+        } else {
+          bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
+        }
+      });
+      break;
+    case "help":
+      bot.sendMessage(msg.chat.id, `${tag}❓ <b>Ecco cosa posso fare:</b>
+➕ <b>Aggiungi</b> — Inserisci un nuovo abbonamento
+📖 <b>Lista</b> — Visualizza i tuoi abbonamenti
+🔁 <b>Rinnova</b> — Aggiorna la scadenza
+🗑 <b>Elimina</b> — Cancella un abbonamento
+⏳ <b>Scadenze</b> — Vedi le scadenze in arrivo
+🔎 <b>Info abbonamento</b> — Dettagli di uno specifico abbonamento
+🛰 <b>Stato servizio</b> — Stato IPTV
+❓ <b>Aiuto</b> — Spiega i comandi
+
+<b>Tip:</b> Usa la tastiera qui sotto per scegliere più velocemente!`,
+        { ...mainMenu(isAdmin(query)), parse_mode: "HTML" }
+      );
+      break;
+  }
+  bot.answerCallbackQuery(query.id);
+});
+
+// ====== GESTIONE RISPOSTE UTENTE PER STATI ======
+bot.on('message', (msg) => {
+  const userId = msg.from.id;
+  const tag = getAdminTag(msg);
+
+  // ADD
+  if (userStates[userId] && userStates[userId].awaitingAdd) {
+    if (!isAdmin(msg)) {
+      bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questa funzione.");
+      delete userStates[userId];
+      return;
+    }
+    const args = msg.text.split(' ').filter(Boolean);
+    if (args.length < 4) {
+      bot.sendMessage(msg.chat.id, `❗ <b>Formato errato!</b>\nScrivi:\n<code>Nome 9.99 EUR 2025-10-31 [note]</code>`, { parse_mode: "HTML" });
+      return;
+    }
+    const [name, cost, currency, dateISO, ...noteArr] = args;
+    let date;
+    try {
+      date = parseDateISO(dateISO);
+    } catch (e) {
+      bot.sendMessage(msg.chat.id, "📅 <b>Data non valida!</b> Usa il formato AAAA-MM-GG", { parse_mode: "HTML" });
+      return;
+    }
+    const note = noteArr.join(' ');
+    const username = msg.from.username || msg.from.first_name || '';
+    const data = loadData();
+    data.push({
+      userId,
+      username,
+      name,
+      cost: Number(cost),
+      currency,
+      dateISO,
+      note,
+      createdAt: nowISO(),
+      updatedAt: nowISO()
+    });
+    saveData(data);
+    bot.sendMessage(msg.chat.id, `✅ <b>${name}</b> aggiunto!
+💸 Costo: ${formatEuro(cost)} ${currency}
+📅 Scadenza: ${dateISO}
+${note ? '📝 Note: ' + note : ''}
+`, { parse_mode: 'HTML' });
+    delete userStates[userId];
     return;
   }
-  const userId = msg.from.id;
+
+  // RENEW
+  if (userStates[userId] && userStates[userId].awaitingRenew) {
+    if (!isAdmin(msg)) {
+      bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questa funzione.");
+      delete userStates[userId];
+      return;
+    }
+    const args = msg.text.split(' ').filter(Boolean);
+    if (args.length < 2) {
+      bot.sendMessage(msg.chat.id, `❗ <b>Formato errato!</b>\nScrivi:\n<code>Nome 2026-01-31</code>`, { parse_mode: "HTML" });
+      return;
+    }
+    const [name, dateISO] = args;
+    let date;
+    try {
+      date = parseDateISO(dateISO);
+    } catch (e) {
+      bot.sendMessage(msg.chat.id, "📅 <b>Data non valida!</b> Usa il formato AAAA-MM-GG", { parse_mode: "HTML" });
+      return;
+    }
+    const data = loadData();
+    let updated = false;
+    data.forEach((x) => {
+      if (x.userId === userId && x.name === name) {
+        x.dateISO = dateISO;
+        x.updatedAt = nowISO();
+        updated = true;
+      }
+    });
+    saveData(data);
+    bot.sendMessage(msg.chat.id, updated
+      ? `🔁 <b>${name}</b> rinnovato fino al ${dateISO} 🎉`
+      : `❌ <b>${name}</b> non trovato!`,
+      { parse_mode: 'HTML' });
+    delete userStates[userId];
+    return;
+  }
+
+  // CANCEL
+  if (userStates[userId] && userStates[userId].awaitingCancel) {
+    if (!isAdmin(msg)) {
+      bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questa funzione.");
+      delete userStates[userId];
+      return;
+    }
+    const name = msg.text.trim();
+    if (!name) {
+      bot.sendMessage(msg.chat.id, `❗ <b>Scrivi il nome!</b>`, { parse_mode: "HTML" });
+      return;
+    }
+    const data = loadData();
+    const before = data.length;
+    const newData = data.filter(x => !(x.userId === userId && x.name === name));
+    saveData(newData);
+    bot.sendMessage(msg.chat.id,
+      before > newData.length
+        ? `🗑 <b>${name}</b> eliminato!`
+        : `❌ <b>${name}</b> non trovato!`, { parse_mode: 'HTML' });
+    delete userStates[userId];
+    return;
+  }
+
+  // INFO (per tutti)
+  if (userStates[userId] && userStates[userId].awaitingInfo) {
+    const abboName = msg.text.trim();
+    const data = loadData().filter(x => x.userId === userId && x.name.toLowerCase() === abboName.toLowerCase());
+
+    if (!data.length) {
+      bot.sendMessage(msg.chat.id, `❌ <b>Nessun abbonamento trovato con nome "${abboName}"</b>!`, { parse_mode: 'HTML' });
+    } else {
+      data.forEach(r => {
+        bot.sendMessage(msg.chat.id, `🔎 <b>${r.name}</b>
+💸 Costo: ${formatEuro(r.cost)} ${r.currency}
+📅 Scadenza: ${r.dateISO}
+${r.note ? '📝 Note: ' + r.note : ''}
+🆕 Aggiunto il: ${r.createdAt.substring(0,10)}`, { parse_mode: 'HTML' });
+      });
+    }
+    delete userStates[userId];
+    return;
+  }
+
+  // Messaggi di default solo se non sono callback
+  if (!msg.text.startsWith('/') && !msg.text.startsWith('➕') && !msg.text.startsWith('📖') && !msg.text.startsWith('🔁') && !msg.text.startsWith('🗑') && !msg.text.startsWith('⏳') && !msg.text.startsWith('🔎') && !msg.text.startsWith('🛰') && !msg.text.startsWith('❓')) {
+    return;
+  }
+  const known = ['/start','/help','/add','/list','/renew','/cancel','/next','/info','/status'];
+  if (!known.some(cmd => msg.text.startsWith(cmd))) {
+    bot.sendMessage(msg.chat.id, `🤔 <b>Comando non riconosciuto!</b>\nUsa la tastiera qui sotto 👇`, { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" });
+  }
+});
+
+// ====== ADMIN-ONLY COMMANDS ======
+function sendList(msg, userId, tag) {
   const data = loadData().filter(x => x.userId === userId);
   if (!data.length) {
-    bot.sendMessage(msg.chat.id, `🗂 Nessun abbonamento registrato. Usa /add per aggiungerne uno.`);
+    bot.sendMessage(msg.chat.id, `${tag}📖 <b>Nessun abbonamento registrato!</b>`, { ...mainMenu(true), parse_mode: "HTML" });
     return;
   }
   const out = data.map(r => {
@@ -80,154 +369,10 @@ bot.onText(/^\/list/, (msg) => {
     const status = days < 0 ? '⛔ Scaduto' : days <= 7 ? '⚠ In scadenza' : '✅ Attivo';
     return `• <b>${r.name}</b> — ${formatEuro(r.cost)} ${r.currency} — scade il ${r.dateISO} — ${status}${r.note ? ' — ' + r.note : ''}`;
   }).join('\n');
-  bot.sendMessage(msg.chat.id, out, { parse_mode: 'HTML' });
-});
+  bot.sendMessage(msg.chat.id, out, { parse_mode: 'HTML', ...mainMenu(true) });
+}
 
-// ====== NUOVO COMANDO: /info ======
-bot.onText(/^\/info$/, (msg) => {
-  userStates[msg.from.id] = { awaitingInfo: true };
-  bot.sendMessage(msg.chat.id, `✏️ Scrivi il nome dell'abbonamento di cui vuoi vedere le informazioni (come hai inserito con /add):`);
-});
-
-// ====== Gestione risposta al comando /info ======
-bot.on('message', (msg) => {
-  // Se non siamo in attesa, ignora
-  if (userStates[msg.from.id] && userStates[msg.from.id].awaitingInfo) {
-    const abboName = msg.text.trim();
-    const userId = msg.from.id;
-    const data = loadData().filter(x => x.userId === userId && x.name.toLowerCase() === abboName.toLowerCase());
-
-    if (!data.length) {
-      bot.sendMessage(msg.chat.id, `❌ Nessun abbonamento trovato con nome "<b>${abboName}</b>". Ricorda di scriverlo esattamente come in /add!`, { parse_mode: 'HTML' });
-    } else {
-      // Mostra info dettagliate (anche più di uno se omonimi)
-      data.forEach(r => {
-        bot.sendMessage(msg.chat.id, `🔎 <b>${r.name}</b>
-Costo: ${formatEuro(r.cost)} ${r.currency}
-Scadenza: ${r.dateISO}
-${r.note ? 'Note: ' + r.note : ''}
-Aggiunto il: ${r.createdAt.substring(0,10)}`, { parse_mode: 'HTML' });
-      });
-    }
-    // Reset stato
-    delete userStates[msg.from.id];
-    return;
-  }
-
-  // Messaggi di default
-  if (!msg.text.startsWith('/')) return;
-  const known = ['/start','/help','/add','/list','/renew','/cancel','/next','/info'];
-  if (!known.some(cmd => msg.text.startsWith(cmd))) {
-    bot.sendMessage(msg.chat.id, `❓ Comando non riconosciuto. Usa /help.`);
-  }
-});
-
-// /add (solo admin)
-bot.onText(/^\/add (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
-    return;
-  }
-  const args = match[1].split(' ').filter(Boolean);
-  if (args.length < 4) {
-    bot.sendMessage(msg.chat.id, `❗ Usa: /add Nome 9.99 EUR 2025-10-31 [note]`);
-    return;
-  }
-  const [name, cost, currency, dateISO, ...noteArr] = args;
-  let date;
-  try {
-    date = parseDateISO(dateISO);
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, "❗ Data non valida, usa AAAA-MM-GG");
-    return;
-  }
-  const note = noteArr.join(' ');
-  const userId = msg.from.id;
-  const username = msg.from.username || msg.from.first_name || '';
-  const data = loadData();
-  data.push({
-    userId,
-    username,
-    name,
-    cost: Number(cost),
-    currency,
-    dateISO,
-    note,
-    createdAt: nowISO(),
-    updatedAt: nowISO()
-  });
-  saveData(data);
-  bot.sendMessage(msg.chat.id, `✅ Aggiunto: <b>${name}</b>
-Costo: ${formatEuro(cost)} ${currency}
-Scadenza: ${dateISO}
-${note ? 'Note: ' + note : ''}`, { parse_mode: 'HTML' });
-});
-
-// /renew (solo admin)
-bot.onText(/^\/renew (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
-    return;
-  }
-  const args = match[1].split(' ').filter(Boolean);
-  if (args.length < 2) {
-    bot.sendMessage(msg.chat.id, `❗ Usa: /renew Nome 2026-01-31`);
-    return;
-  }
-  const [name, dateISO] = args;
-  let date;
-  try {
-    date = parseDateISO(dateISO);
-  } catch (e) {
-    bot.sendMessage(msg.chat.id, "❗ Data non valida, usa AAAA-MM-GG");
-    return;
-  }
-  const userId = msg.from.id;
-  const data = loadData();
-  let updated = false;
-  data.forEach((x) => {
-    if (x.userId === userId && x.name === name) {
-      x.dateISO = dateISO;
-      x.updatedAt = nowISO();
-      updated = true;
-    }
-  });
-  saveData(data);
-  bot.sendMessage(msg.chat.id, updated
-    ? `🔁 Rinnovato <b>${name}</b> fino al ${dateISO}`
-    : `❌ Abbonamento <b>${name}</b> non trovato.`,
-    { parse_mode: 'HTML' });
-});
-
-// /cancel (solo admin)
-bot.onText(/^\/cancel (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
-    return;
-  }
-  const name = match[1].trim();
-  if (!name) {
-    bot.sendMessage(msg.chat.id, `❗ Usa: /cancel Nome`);
-    return;
-  }
-  const userId = msg.from.id;
-  const data = loadData();
-  const before = data.length;
-  const newData = data.filter(x => !(x.userId === userId && x.name === name));
-  saveData(newData);
-  bot.sendMessage(msg.chat.id,
-    before > newData.length
-      ? `🗑 Cancellato <b>${name}</b>.`
-      : `❌ Abbonamento <b>${name}</b> non trovato.`, { parse_mode: 'HTML' });
-});
-
-// /next (solo admin)
-bot.onText(/^\/next/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Solo l'amministratore può usare questo comando.");
-    return;
-  }
-  const userId = msg.from.id;
+function sendNext(msg, userId, tag) {
   const data = loadData().filter(x => x.userId === userId);
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() + 30);
@@ -241,7 +386,7 @@ bot.onText(/^\/next/, (msg) => {
   });
 
   if (!upcoming.length) {
-    bot.sendMessage(msg.chat.id, `📅 Nessuna scadenza nei prossimi 30 giorni.`);
+    bot.sendMessage(msg.chat.id, `${tag}⏳ <b>Nessuna scadenza nei prossimi 30 giorni!</b>`, { ...mainMenu(true), parse_mode: "HTML" });
     return;
   }
 
@@ -251,8 +396,8 @@ bot.onText(/^\/next/, (msg) => {
     return `• <b>${r.name}</b> — ${formatEuro(r.cost)} ${r.currency} — in ${daysLeft} giorni (scade il ${r.dateISO})`;
   }).join('\n');
 
-  bot.sendMessage(msg.chat.id, `⏰ Scadenze prossime:\n${out}`, { parse_mode: 'HTML' });
-});
+  bot.sendMessage(msg.chat.id, `${tag}⏳ <b>Scadenze prossime:</b>\n${out}`, { parse_mode: 'HTML', ...mainMenu(true) });
+}
 
 // Reminder giornaliero e export invariato
 function dailyReminders() {
@@ -276,7 +421,7 @@ function dailyReminders() {
     const msg = usersToNotif[uid].map(x =>
       `• <b>${x.name}</b> — ${formatEuro(x.cost)} ${x.currency} — scade il ${x.dateISO} (in ${x.daysLeft} giorni)`
     ).join('\n');
-    bot.sendMessage(uid, `🔔 Promemoria scadenze:\n${msg}`, { parse_mode: 'HTML' });
+    bot.sendMessage(uid, `🔔 <b>Promemoria scadenze:</b>\n${msg}`, { parse_mode: 'HTML' });
   });
 }
 
