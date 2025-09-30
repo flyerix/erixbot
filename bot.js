@@ -1,7 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
+const fetch = require('node-fetch'); // Assicurati di installare: npm install node-fetch@2
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -25,9 +25,9 @@ function nowISO() {
 
 function parseDateISO(str) {
   const parts = str.trim().split('-');
-  if (parts.length !== 3) throw new Error('📅 Data non valida! Usa il formato AAAA-MM-GG');
+  if (parts.length !== 3) throw new Error('Data non valida, usa AAAA-MM-GG');
   const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  if (isNaN(d.getTime())) throw new Error('📅 Data non valida! Usa il formato AAAA-MM-GG');
+  if (isNaN(d.getTime())) throw new Error('Data non valida, usa AAAA-MM-GG');
   return d;
 }
 
@@ -44,7 +44,10 @@ function isAdmin(msg) {
 // ===== STATE FOR INFO REQUEST =====
 const userStates = {};
 
-// ===== KEYBOARD OPTIONS =====
+function getAdminTag(msg) {
+  return isAdmin(msg) ? "👑 [ADMIN] " : "";
+}
+
 function mainMenu(isAdminUser = false) {
   const buttons = [];
   if (isAdminUser) {
@@ -75,15 +78,11 @@ function mainMenu(isAdminUser = false) {
 }
 
 // ====== START / MAIN MENU ======
-function getAdminTag(msg) {
-  return isAdmin(msg) ? "👑 [ADMIN] " : "";
-}
-
 bot.onText(/^\/start/, (msg) => {
   const tag = getAdminTag(msg);
   bot.sendMessage(
     msg.chat.id,
-    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>ErixBot</b> 🤖\nChiedimi qualcosa, sono qui per aiutarti!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
+    `${tag}🚀 Benvenuto ${msg.from.first_name}!\n\nSono <b>ErixBot</b> 🤖\nControlla le mie opzioni, sono qui per aiutare!\n\nCosa vuoi fare oggi? Scegli una funzione:`,
     { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" }
   );
 });
@@ -108,31 +107,40 @@ bot.onText(/^\/help/, (msg) => {
 });
 
 // ====== STATUS ======
-bot.onText(/^\/status/, (msg) => {
+bot.onText(/^\/status/, async (msg) => {
   const tag = getAdminTag(msg);
-  checkServiceStatus().then(status => {
-    if (status === "ONLINE") {
-      bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
-    } else {
-      bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
-    }
-  }).catch(() => {
+  const status = await checkServiceStatus();
+  if (status === "ONLINE") {
+    bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
+  } else if (status === "OFFLINE") {
+    bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
+  } else {
     bot.sendMessage(msg.chat.id, `${tag}⚠️ Impossibile verificare lo stato del servizio.`, { parse_mode: "HTML" });
-  });
+  }
 });
 
-function checkServiceStatus() {
-  return new Promise((resolve, reject) => {
-    https.get("https://miglioriptvreseller.xyz/", (res) => {
-      if (res.statusCode === 200) {
-        resolve("ONLINE");
-      } else {
-        resolve("OFFLINE");
-      }
-    }).on('error', () => {
-      resolve("OFFLINE");
-    });
-  });
+/**
+ * Funzione /status aggiornata:
+ * - Usa node-fetch
+ * - Considera ONLINE se la pagina contiene almeno una parola chiave tipica
+ * - Considera OFFLINE se non trova parole chiave o errori
+ */
+async function checkServiceStatus() {
+  try {
+    const res = await fetch("https://miglioriptvreseller.xyz/", { timeout: 5000 });
+    const body = await res.text();
+    // Cerca parole chiave che indicano la presenza di servizio
+    if (
+      res.status === 200 &&
+      /iptv|reseller|login|username|abbonamento|dashboard|accesso|servizio/i.test(body)
+    ) {
+      return "ONLINE";
+    } else {
+      return "OFFLINE";
+    }
+  } catch (e) {
+    return "OFFLINE";
+  }
 }
 
 // ====== CALLBACK QUERY HANDLER (bottoni) ======
@@ -185,13 +193,14 @@ bot.on('callback_query', async query => {
       bot.sendMessage(msg.chat.id, `${tag}🔎 <b>Scrivi il nome dell'abbonamento di cui vuoi vedere le info:</b>`, { parse_mode: "HTML" });
       break;
     case "status":
-      checkServiceStatus().then(status => {
-        if (status === "ONLINE") {
-          bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
-        } else {
-          bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
-        }
-      });
+      const status = await checkServiceStatus();
+      if (status === "ONLINE") {
+        bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è ONLINE!</b> ✅`, { parse_mode: "HTML" });
+      } else if (status === "OFFLINE") {
+        bot.sendMessage(msg.chat.id, `${tag}🛰 <b>Il servizio IPTV è OFFLINE!</b> ❌`, { parse_mode: "HTML" });
+      } else {
+        bot.sendMessage(msg.chat.id, `${tag}⚠️ Impossibile verificare lo stato del servizio.`, { parse_mode: "HTML" });
+      }
       break;
     case "help":
       bot.sendMessage(msg.chat.id, `${tag}❓ <b>Ecco cosa posso fare:</b>
