@@ -1,7 +1,7 @@
 {
   "name": "erixbot",
   "version": "1.0.0",
-  "description": "Telegram Bot per gestione abbonamenti IPTV e sistema di supporto",
+  "description": "Telegram Bot",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
