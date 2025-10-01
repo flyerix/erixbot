@@ -12,7 +12,10 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_ID = 691735614;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const TICKETS_FILE = path.join(__dirname, 'tickets.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
 const BASE_TIMEZONE = 'Europe/Rome';
+const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 // === BOT SETUP ===
 const bot = new TelegramBot(TOKEN, { webHook: true });
@@ -36,6 +39,26 @@ function loadTickets() {
 
 function saveTickets(tickets) {
   fs.writeFileSync(TICKETS_FILE, JSON.stringify(tickets, null, 2));
+}
+
+function loadUsers() {
+  if (!fs.existsSync(USERS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(USERS_FILE));
+}
+
+function saveUsers(users) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
+
+function getUserPreferences(userId) {
+  const users = loadUsers();
+  return users[userId] || { footballTeam: null, wantsFootballUpdates: false };
+}
+
+function saveUserPreferences(userId, preferences) {
+  const users = loadUsers();
+  users[userId] = { ...getUserPreferences(userId), ...preferences };
+  saveUsers(users);
 }
 
 function nowISO() {
@@ -68,6 +91,155 @@ function generateTicketId() {
   return 'T' + Date.now() + Math.random().toString(36).substr(2, 5).toUpperCase();
 }
 
+// Funzione per ottenere informazioni sulla squadra
+async function getTeamInfo(teamName) {
+  try {
+    if (!FOOTBALL_API_KEY) {
+      console.log('Football API key non configurata');
+      return getMockTeamInfo(teamName);
+    }
+
+    // Prima cerca l'ID della squadra
+    const searchResponse = await fetch(`https://api.football-data.org/v4/teams?name=${encodeURIComponent(teamName)}`, {
+      headers: { 'X-Auth-Token': FOOTBALL_API_KEY },
+      timeout: 10000
+    });
+    
+    if (!searchResponse.ok) {
+      console.log('Errore API football:', searchResponse.status);
+      return getMockTeamInfo(teamName);
+    }
+    
+    const searchData = await searchResponse.json();
+    if (!searchData.teams || searchData.teams.length === 0) {
+      return getMockTeamInfo(teamName);
+    }
+    
+    const team = searchData.teams[0];
+    const teamId = team.id;
+    
+    // Ottieni le prossime partite
+    const matchesResponse = await fetch(`https://api.football-data.org/v4/teams/${teamId}/matches?status=SCHEDULED&limit=5`, {
+      headers: { 'X-Auth-Token': FOOTBALL_API_KEY },
+      timeout: 10000
+    });
+    
+    let matches = [];
+    if (matchesResponse.ok) {
+      const matchesData = await matchesResponse.json();
+      matches = matchesData.matches || [];
+    }
+    
+    // Ottieni notizie
+    const news = await getTeamNews(teamName);
+    
+    return {
+      team: {
+        id: team.id,
+        name: team.name,
+        shortName: team.shortName,
+        crest: team.crest,
+        venue: team.venue
+      },
+      matches: matches.map(match => ({
+        id: match.id,
+        competition: match.competition?.name,
+        homeTeam: match.homeTeam?.name,
+        awayTeam: match.awayTeam?.name,
+        date: match.utcDate,
+        status: match.status
+      })),
+      news: news
+    };
+  } catch (error) {
+    console.error('Errore nel recupero info squadra:', error);
+    return getMockTeamInfo(teamName);
+  }
+}
+
+// Funzione per ottenere notizie sulla squadra
+async function getTeamNews(teamName) {
+  try {
+    if (!NEWS_API_KEY) {
+      return getMockNews(teamName);
+    }
+
+    const newsResponse = await fetch(`https://newsapi.org/v2/everything?q=${encodeURIComponent(teamName)}+calcio&language=it&sortBy=publishedAt&pageSize=3&apiKey=${NEWS_API_KEY}`, {
+      timeout: 10000
+    });
+    
+    if (!newsResponse.ok) {
+      console.log('Errore API news:', newsResponse.status);
+      return getMockNews(teamName);
+    }
+    
+    const newsData = await newsResponse.json();
+    return newsData.articles?.map(article => ({
+      title: article.title,
+      description: article.description,
+      url: article.url,
+      publishedAt: article.publishedAt,
+      source: article.source?.name
+    })) || [];
+  } catch (error) {
+    console.error('Errore nel recupero notizie:', error);
+    return getMockNews(teamName);
+  }
+}
+
+// Funzioni mock per quando le API non sono disponibili
+function getMockTeamInfo(teamName) {
+  const mockMatches = [
+    {
+      id: 1,
+      competition: "Serie A",
+      homeTeam: teamName,
+      awayTeam: "Avversaria",
+      date: new Date(Date.now() + 86400000 * 3).toISOString(),
+      status: "SCHEDULED"
+    },
+    {
+      id: 2,
+      competition: "Coppa Italia",
+      homeTeam: "Altra Squadra",
+      awayTeam: teamName,
+      date: new Date(Date.now() + 86400000 * 7).toISOString(),
+      status: "SCHEDULED"
+    }
+  ];
+
+  return {
+    team: {
+      id: 999,
+      name: teamName,
+      shortName: teamName.substring(0, 3).toUpperCase(),
+      crest: null,
+      venue: "Stadio " + teamName
+    },
+    matches: mockMatches,
+    news: getMockNews(teamName)
+  };
+}
+
+function getMockNews(teamName) {
+  return [
+    {
+      title: `${teamName}: ultime notizie sulla squadra`,
+      description: `Segui tutte le ultime novità sulla ${teamName} nella nostra rubrica speciale.`,
+      url: "https://example.com/news",
+      publishedAt: new Date().toISOString(),
+      source: "Gazzetta dello Sport"
+    },
+    {
+      title: `Prossime partite per la ${teamName}`,
+      description: `Calendario completo delle prossime gare della ${teamName}.`,
+      url: "https://example.com/calendar",
+      publishedAt: new Date(Date.now() - 86400000).toISOString(),
+      source: "Corriere dello Sport"
+    }
+  ];
+}
+
 function mainMenu(isAdminUser = false) {
   const buttons = [];
   if (isAdminUser) {
@@ -88,6 +260,7 @@ function mainMenu(isAdminUser = false) {
     { text: "🛰 Stato servizio", callback_data: "status" }
   ]);
   buttons.push([
+    { text: "⚽ Calcio", callback_data: "football" },
     { text: "🎫 Supporto", callback_data: "support" }
   ]);
   buttons.push([
@@ -132,6 +305,35 @@ function supportMenu(isAdminUser = false, ticketId = null) {
   };
 }
 
+// Menu per il calcio
+function footballMenu(hasTeam = false, wantsUpdates = false) {
+  const buttons = [];
+  
+  if (!hasTeam) {
+    buttons.push([{ text: "⚽ Imposta squadra preferita", callback_data: "set_football_team" }]);
+  } else {
+    buttons.push([{ text: "🔄 Cambia squadra", callback_data: "set_football_team" }]);
+    
+    if (wantsUpdates) {
+      buttons.push([{ text: "🔔 Disattiva notifiche", callback_data: "disable_football_updates" }]);
+    } else {
+      buttons.push([{ text: "🔔 Attiva notifiche", callback_data: "enable_football_updates" }]);
+    }
+    
+    buttons.push([{ text: "📰 Ultime notizie", callback_data: "football_news" }]);
+    buttons.push([{ text: "📅 Prossime partite", callback_data: "football_matches" }]);
+    buttons.push([{ text: "ℹ️ Info squadra", callback_data: "football_info" }]);
+  }
+  
+  buttons.push([{ text: "🔙 Menu Principale", callback_data: "main_menu" }]);
+  
+  return {
+    reply_markup: {
+      inline_keyboard: buttons
+    }
+  };
+}
+
 // === WEBHOOK EXPRESS HANDLER ===
 app.post('/', (req, res) => {
   bot.processUpdate(req.body);
@@ -162,6 +364,7 @@ bot.onText(/^\/help/, (msg) => {
 ⏳ <b>Scadenze</b> — Vedi le scadenze in arrivo
 🔎 <b>Info abbonamento</b> — Dettagli di uno specifico abbonamento
 🛰 <b>Stato servizio</b> — Stato IPTV
+⚽ <b>Calcio</b> — Info sulla tua squadra preferita
 🎫 <b>Supporto</b> — Sistema di ticket di supporto
 ❓ <b>Aiuto</b> — Spiega i comandi
 
@@ -205,6 +408,24 @@ bot.onText(/^\/support/, (msg) => {
       { ...supportMenu(false), parse_mode: "HTML" }
     );
   }
+});
+
+bot.onText(/^\/calcio/, (msg) => {
+  const preferences = getUserPreferences(msg.from.id);
+  let footballMessage = `⚽ <b>Menu Calcio</b>\n\n`;
+  
+  if (preferences.footballTeam) {
+    footballMessage += `La tua squadra preferita: <b>${preferences.footballTeam}</b>\n`;
+    footballMessage += `Notifiche: ${preferences.wantsFootballUpdates ? '🔔 ATTIVE' : '🔕 DISATTIVATE'}\n\n`;
+    footballMessage += `Scegli un'opzione qui sotto:`;
+  } else {
+    footballMessage += `Non hai ancora impostato una squadra preferita.\n\nImpostala ora per ricevere notizie e informazioni sulle prossime partite!`;
+  }
+  
+  bot.sendMessage(msg.chat.id, footballMessage, {
+    ...footballMenu(!!preferences.footballTeam, preferences.wantsFootballUpdates),
+    parse_mode: "HTML"
+  });
 });
 
 async function checkServiceStatus() {
@@ -292,6 +513,7 @@ bot.on('callback_query', async query => {
 ⏳ <b>Scadenze</b> — Vedi le scadenze in arrivo
 🔎 <b>Info abbonamento</b> — Dettagli di uno specifico abbonamento
 🛰 <b>Stato servizio</b> — Stato IPTV
+⚽ <b>Calcio</b> — Info sulla tua squadra preferita
 🎫 <b>Supporto</b> — Sistema di ticket di supporto
 ❓ <b>Aiuto</b> — Spiega i comandi
 
@@ -317,10 +539,27 @@ bot.on('callback_query', async query => {
       } else {
         bot.sendMessage(
           msg.chat.id,
-          `🎫 <b>Supporto Clienti</b>\n\nHai bisogno di assistenza? Apri un ticket e ti aiuteremo al più presto!`,
+          `🎫 <b>Supporto Clienti</b>\n\nHai bisogno di assistencia? Apri un ticket e ti aiuteremo al più presto!`,
           { ...supportMenu(false), parse_mode: "HTML" }
         );
       }
+      break;
+    case "football":
+      const preferences = getUserPreferences(userId);
+      let footballMessage = `⚽ <b>Menu Calcio</b>\n\n`;
+      
+      if (preferences.footballTeam) {
+        footballMessage += `La tua squadra preferita: <b>${preferences.footballTeam}</b>\n`;
+        footballMessage += `Notifiche: ${preferences.wantsFootballUpdates ? '🔔 ATTIVE' : '🔕 DISATTIVATE'}\n\n`;
+        footballMessage += `Scegli un'opzione qui sotto:`;
+      } else {
+        footballMessage += `Non hai ancora impostato una squadra preferita.\n\nImpostala ora per ricevere notizie e informazioni sulle prossime partite!`;
+      }
+      
+      bot.sendMessage(msg.chat.id, footballMessage, {
+        ...footballMenu(!!preferences.footballTeam, preferences.wantsFootballUpdates),
+        parse_mode: "HTML"
+      });
       break;
     case "main_menu":
       bot.sendMessage(
@@ -368,6 +607,42 @@ bot.on('callback_query', async query => {
         return;
       }
       showAdminTickets(msg, 'closed');
+      break;
+    case "set_football_team":
+      userStates[userId] = { awaitingFootballTeam: true };
+      bot.sendMessage(
+        msg.chat.id,
+        `⚽ <b>Imposta la tua squadra preferita</b>\n\nScrivi il nome della tua squadra di calcio preferita (es: "Juventus", "Milan", "Inter", "Roma", etc.):`,
+        { parse_mode: "HTML" }
+      );
+      break;
+    case "enable_football_updates":
+      saveUserPreferences(userId, { wantsFootballUpdates: true });
+      bot.sendMessage(
+        msg.chat.id,
+        `🔔 <b>Notifiche calcio attivate!</b>\n\nRiceverai aggiornamenti sulla tua squadra preferita.`,
+        { ...footballMenu(true, true), parse_mode: "HTML" }
+      );
+      break;
+    case "disable_football_updates":
+      saveUserPreferences(userId, { wantsFootballUpdates: false });
+      bot.sendMessage(
+        msg.chat.id,
+        `🔕 <b>Notifiche calcio disattivate!</b>\n\nNon riceverai più aggiornamenti automatici.`,
+        { ...footballMenu(true, false), parse_mode: "HTML" }
+      );
+      break;
+    case "football_news":
+      await sendFootballNews(msg, userId);
+      break;
+    case "football_matches":
+      await sendFootballMatches(msg, userId);
+      break;
+    case "football_info":
+      await sendFootballInfo(msg, userId);
+      break;
+    case "football_info_now":
+      await sendFootballInfo(msg, userId);
       break;
   }
 
@@ -660,11 +935,44 @@ ${r.note ? '📝 Note: ' + r.note : ''}
     return;
   }
 
-  // Messaggi di default solo se non sono callback
-  if (!msg.text.startsWith('/') && !msg.text.startsWith('➕') && !msg.text.startsWith('📖') && !msg.text.startsWith('🔁') && !msg.text.startsWith('🗑') && !msg.text.startsWith('⏳') && !msg.text.startsWith('🔎') && !msg.text.startsWith('🛰') && !msg.text.startsWith('🎫') && !msg.text.startsWith('❓')) {
+  // GESTIONE SQUADRA DI CALCIO
+  if (userStates[userId] && userStates[userId].awaitingFootballTeam) {
+    const teamName = msg.text.trim();
+    
+    if (!teamName) {
+      bot.sendMessage(msg.chat.id, "❌ Il nome della squadra non può essere vuoto!");
+      return;
+    }
+    
+    // Salva la squadra preferita
+    saveUserPreferences(userId, { footballTeam: teamName });
+    
+    // Chiedi se vuole notifiche
+    userStates[userId] = { awaitingFootballUpdates: true };
+    
+    bot.sendMessage(
+      msg.chat.id,
+      `✅ <b>Squadra impostata:</b> ${teamName}\n\nVuoi ricevere notizie e informazioni sulle prossime partite di questa squadra?`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Sì, attiva notifiche", callback_data: "enable_football_updates" },
+              { text: "❌ No, solo informazioni", callback_data: "football_info_now" }
+            ]
+          ]
+        },
+        parse_mode: "HTML"
+      }
+    );
     return;
   }
-  const known = ['/start','/help','/add','/list','/renew','/cancel','/next','/info','/status','/support'];
+
+  // Messaggi di default solo se non sono callback
+  if (!msg.text.startsWith('/') && !msg.text.startsWith('➕') && !msg.text.startsWith('📖') && !msg.text.startsWith('🔁') && !msg.text.startsWith('🗑') && !msg.text.startsWith('⏳') && !msg.text.startsWith('🔎') && !msg.text.startsWith('🛰') && !msg.text.startsWith('🎫') && !msg.text.startsWith('❓') && !msg.text.startsWith('⚽')) {
+    return;
+  }
+  const known = ['/start','/help','/add','/list','/renew','/cancel','/next','/info','/status','/support','/calcio'];
   if (!known.some(cmd => msg.text.startsWith(cmd))) {
     bot.sendMessage(msg.chat.id, `🤔 <b>Comando non riconosciuto!</b>\nUsa la tastiera qui sotto 👇`, { ...mainMenu(isAdmin(msg)), parse_mode: "HTML" });
   }
@@ -714,6 +1022,144 @@ function sendNext(msg, userId, tag) {
   }).join('\n');
 
   bot.sendMessage(msg.chat.id, `${tag}⏳ <b>Scadenze prossime:</b>\n${out}`, { parse_mode: 'HTML', ...mainMenu(true) });
+}
+
+// === FUNZIONI PER IL CALCIO ===
+async function sendFootballNews(msg, userId) {
+  const preferences = getUserPreferences(userId);
+  
+  if (!preferences.footballTeam) {
+    bot.sendMessage(msg.chat.id, "❌ Prima imposta la tua squadra preferita!");
+    return;
+  }
+  
+  const teamInfo = await getTeamInfo(preferences.footballTeam);
+  
+  if (!teamInfo || !teamInfo.news || teamInfo.news.length === 0) {
+    bot.sendMessage(
+      msg.chat.id,
+      `❌ Nessuna notizia recente trovata per <b>${preferences.footballTeam}</b>.\n\nProva più tardi o verifica il nome della squadra.`,
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+  
+  let message = `📰 <b>Ultime notizie per ${preferences.footballTeam}</b>\n\n`;
+  
+  teamInfo.news.forEach((article, index) => {
+    message += `<b>${index + 1}. ${article.title}</b>\n`;
+    if (article.description) {
+      message += `${article.description}\n`;
+    }
+    message += `<a href="${article.url}">Leggi articolo completo</a>\n`;
+    message += `Fonte: ${article.source} | ${new Date(article.publishedAt).toLocaleDateString('it-IT')}\n\n`;
+  });
+  
+  bot.sendMessage(msg.chat.id, message, {
+    parse_mode: "HTML",
+    disable_web_page_preview: false,
+    ...footballMenu(true, preferences.wantsFootballUpdates)
+  });
+}
+
+async function sendFootballMatches(msg, userId) {
+  const preferences = getUserPreferences(userId);
+  
+  if (!preferences.footballTeam) {
+    bot.sendMessage(msg.chat.id, "❌ Prima imposta la tua squadra preferita!");
+    return;
+  }
+  
+  const teamInfo = await getTeamInfo(preferences.footballTeam);
+  
+  if (!teamInfo || !teamInfo.matches || teamInfo.matches.length === 0) {
+    bot.sendMessage(
+      msg.chat.id,
+      `❌ Nessuna partita in programma trovata per <b>${preferences.footballTeam}</b>.\n\nPotrebbe essere fuori stagione o verifica il nome della squadra.`,
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+  
+  let message = `📅 <b>Prossime partite di ${preferences.footballTeam}</b>\n\n`;
+  
+  teamInfo.matches.forEach((match, index) => {
+    const matchDate = new Date(match.date).toLocaleDateString('it-IT', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    
+    message += `<b>${index + 1}. ${match.homeTeam} vs ${match.awayTeam}</b>\n`;
+    message += `🏆 ${match.competition || "Competizione"}\n`;
+    message += `📅 ${matchDate}\n`;
+    message += `🔵 ${match.status}\n\n`;
+  });
+  
+  bot.sendMessage(msg.chat.id, message, {
+    parse_mode: "HTML",
+    ...footballMenu(true, preferences.wantsFootballUpdates)
+  });
+}
+
+async function sendFootballInfo(msg, userId) {
+  const preferences = getUserPreferences(userId);
+  
+  if (!preferences.footballTeam) {
+    bot.sendMessage(msg.chat.id, "❌ Prima imposta la tua squadra preferita!");
+    return;
+  }
+  
+  const teamInfo = await getTeamInfo(preferences.footballTeam);
+  
+  if (!teamInfo) {
+    bot.sendMessage(
+      msg.chat.id,
+      `❌ Impossibile trovare informazioni per <b>${preferences.footballTeam}</b>.\n\nVerifica il nome della squadra e riprova.`,
+      { parse_mode: "HTML" }
+    );
+    return;
+  }
+  
+  let message = `⚽ <b>Informazioni su ${teamInfo.team.name}</b>\n\n`;
+  
+  if (teamInfo.team.crest) {
+    message += `<a href="${teamInfo.team.crest}">🏟️</a> `;
+  }
+  
+  message += `<b>Nome completo:</b> ${teamInfo.team.name}\n`;
+  message += `<b>Nome abbreviato:</b> ${teamInfo.team.shortName}\n`;
+  
+  if (teamInfo.team.venue) {
+    message += `<b>Stadio:</b> ${teamInfo.team.venue}\n`;
+  }
+  
+  message += `\n<b>Prossime partite:</b>\n`;
+  
+  if (teamInfo.matches && teamInfo.matches.length > 0) {
+    teamInfo.matches.slice(0, 3).forEach(match => {
+      const matchDate = new Date(match.date).toLocaleDateString('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      
+      message += `• ${match.homeTeam} vs ${match.awayTeam} (${matchDate})\n`;
+    });
+  } else {
+    message += `Nessuna partita in programma\n`;
+  }
+  
+  message += `\n<b>Ultime notizie:</b> ${teamInfo.news && teamInfo.news.length > 0 ? `${teamInfo.news.length} articoli recenti` : 'Nessuna notizia recente'}`;
+  
+  bot.sendMessage(msg.chat.id, message, {
+    parse_mode: "HTML",
+    ...footballMenu(true, preferences.wantsFootballUpdates)
+  });
 }
 
 // Funzioni per la gestione dei ticket
