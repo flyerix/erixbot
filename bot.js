@@ -418,6 +418,270 @@ function footballMenu(hasTeam = false, wantsUpdates = false) {
   };
 }
 
+// === FUNZIONI PER LA GESTIONE DEI TICKET ===
+
+// Mostra i ticket all'admin
+function showAdminTickets(msg, status) {
+  const tickets = loadTickets();
+  const filteredTickets = tickets.filter(ticket => ticket.status === status);
+  
+  if (filteredTickets.length === 0) {
+    let statusText = '';
+    switch (status) {
+      case 'open': statusText = 'aperti'; break;
+      case 'assigned': statusText = 'assegnati'; break;
+      case 'closed': statusText = 'chiusi'; break;
+    }
+    bot.sendMessage(
+      msg.chat.id,
+      `📋 <b>Nessun ticket ${statusText} trovato</b>`,
+      { 
+        ...supportMenu(true),
+        parse_mode: "HTML" 
+      }
+    );
+    return;
+  }
+
+  let message = '';
+  switch (status) {
+    case 'open':
+      message = '📋 <b>Ticket Aperti</b>\n\n';
+      break;
+    case 'assigned':
+      message = '📥 <b>Ticket Assegnati a Te</b>\n\n';
+      break;
+    case 'closed':
+      message = '✅ <b>Ticket Chiusi</b>\n\n';
+      break;
+  }
+
+  filteredTickets.forEach((ticket, index) => {
+    const date = new Date(ticket.createdAt).toLocaleDateString('it-IT');
+    message += `<b>${index + 1}. Ticket ${ticket.id}</b>\n`;
+    message += `👤 <b>Utente:</b> ${ticket.userName}\n`;
+    message += `📅 <b>Data:</b> ${date}\n`;
+    message += `📝 <b>Richiesta:</b> ${ticket.subject.substring(0, 100)}${ticket.subject.length > 100 ? '...' : ''}\n`;
+    
+    if (ticket.assignedAdmin) {
+      message += `👨‍💼 <b>Assegnato a:</b> ${ticket.assignedAdmin}\n`;
+    }
+    
+    message += `\n────────────────────\n\n`;
+  });
+
+  // Crea i bottoni per i ticket
+  const buttons = [];
+  filteredTickets.forEach(ticket => {
+    buttons.push([
+      { 
+        text: `📋 Ticket ${ticket.id}`, 
+        callback_data: `view_${ticket.id}` 
+      }
+    ]);
+  });
+  
+  buttons.push([{ text: "🔙 Menu Supporto", callback_data: "support" }]);
+
+  bot.sendMessage(msg.chat.id, message, {
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: buttons
+    }
+  });
+}
+
+// Mostra i ticket dell'utente
+function showUserTickets(msg, userId) {
+  const tickets = loadTickets();
+  const userTickets = tickets.filter(ticket => ticket.userId === userId);
+  
+  if (userTickets.length === 0) {
+    bot.sendMessage(
+      msg.chat.id,
+      `📋 <b>Non hai alcun ticket aperto</b>\n\nApri un nuovo ticket se hai bisogno di assistenza.`,
+      { 
+        ...supportMenu(false),
+        parse_mode: "HTML" 
+      }
+    );
+    return;
+  }
+
+  let message = '📋 <b>I tuoi Ticket</b>\n\n';
+
+  userTickets.forEach((ticket, index) => {
+    const date = new Date(ticket.createdAt).toLocaleDateString('it-IT');
+    let statusEmoji = '🟡';
+    let statusText = 'Aperto';
+    
+    if (ticket.status === 'assigned') {
+      statusEmoji = '🔵';
+      statusText = 'In lavorazione';
+    } else if (ticket.status === 'closed') {
+      statusEmoji = '✅';
+      statusText = 'Chiuso';
+    }
+
+    message += `<b>${index + 1}. Ticket ${ticket.id}</b> ${statusEmoji}\n`;
+    message += `📅 <b>Data:</b> ${date}\n`;
+    message += `📝 <b>Richiesta:</b> ${ticket.subject.substring(0, 100)}${ticket.subject.length > 100 ? '...' : ''}\n`;
+    message += `🔄 <b>Stato:</b> ${statusText}\n`;
+    
+    if (ticket.assignedAdmin) {
+      message += `👨‍💼 <b>Assegnato a:</b> ${ticket.assignedAdmin}\n`;
+    }
+    
+    message += `\n────────────────────\n\n`;
+  });
+
+  bot.sendMessage(msg.chat.id, message, {
+    parse_mode: "HTML",
+    ...supportMenu(false)
+  });
+}
+
+// Visualizza un ticket specifico
+function viewTicket(msg, ticketId, isAdmin) {
+  const tickets = loadTickets();
+  const ticket = tickets.find(t => t.id === ticketId);
+  
+  if (!ticket) {
+    bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
+    return;
+  }
+
+  // Controlla i permessi
+  if (!isAdmin && ticket.userId !== msg.from.id) {
+    bot.sendMessage(msg.chat.id, "❌ Non hai i permessi per visualizzare questo ticket!");
+    return;
+  }
+
+  const date = new Date(ticket.createdAt).toLocaleDateString('it-IT');
+  let statusEmoji = '🟡';
+  let statusText = 'Aperto';
+  
+  if (ticket.status === 'assigned') {
+    statusEmoji = '🔵';
+    statusText = 'In lavorazione';
+  } else if (ticket.status === 'closed') {
+    statusEmoji = '✅';
+    statusText = 'Chiuso';
+  }
+
+  let message = `🎫 <b>Ticket ${ticket.id}</b> ${statusEmoji}\n\n`;
+  message += `👤 <b>Utente:</b> ${ticket.userName}\n`;
+  message += `📅 <b>Data apertura:</b> ${date}\n`;
+  message += `🔄 <b>Stato:</b> ${statusText}\n`;
+  
+  if (ticket.assignedAdmin) {
+    message += `👨‍💼 <b>Assegnato a:</b> ${ticket.assignedAdmin}\n`;
+  }
+  
+  message += `\n📝 <b>Richiesta:</b>\n${ticket.subject}\n`;
+
+  // Mostra le risposte
+  if (ticket.replies && ticket.replies.length > 0) {
+    message += `\n💬 <b>Risposte:</b>\n`;
+    ticket.replies.forEach((reply, index) => {
+      const replyDate = new Date(reply.timestamp).toLocaleDateString('it-IT');
+      if (reply.type === 'admin') {
+        message += `\n👨‍💼 <b>Staff (${reply.adminName}) - ${replyDate}:</b>\n${reply.message}\n`;
+      } else {
+        message += `\n👤 <b>Utente - ${replyDate}:</b>\n${reply.message}\n`;
+      }
+    });
+  } else {
+    message += `\n💬 <b>Nessuna risposta ancora.</b>\n`;
+  }
+
+  if (isAdmin) {
+    bot.sendMessage(msg.chat.id, message, {
+      parse_mode: "HTML",
+      ...supportMenu(true, ticketId)
+    });
+  } else {
+    bot.sendMessage(msg.chat.id, message, {
+      parse_mode: "HTML",
+      ...supportMenu(false)
+    });
+  }
+}
+
+// Assegna un ticket all'admin
+function assignTicket(msg, ticketId, adminId, adminName) {
+  const tickets = loadTickets();
+  const ticketIndex = tickets.findIndex(t => t.id === ticketId);
+  
+  if (ticketIndex === -1) {
+    bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
+    return;
+  }
+
+  tickets[ticketIndex].status = 'assigned';
+  tickets[ticketIndex].assignedTo = adminId;
+  tickets[ticketIndex].assignedAdmin = adminName;
+  tickets[ticketIndex].updatedAt = nowISO();
+  
+  saveTickets(tickets);
+
+  // Conferma all'admin
+  bot.sendMessage(
+    msg.chat.id,
+    `✅ <b>Ticket ${ticketId} assegnato a te!</b>`,
+    { 
+      ...supportMenu(true, ticketId),
+      parse_mode: "HTML" 
+    }
+  );
+
+  // Notifica all'utente
+  bot.sendMessage(
+    tickets[ticketIndex].userId,
+    `🎫 <b>Il tuo ticket ${ticketId} è stato preso in carico!</b>\n\nLo staff ti risponderà al più presto.`,
+    { parse_mode: "HTML" }
+  );
+}
+
+// Chiude un ticket
+function closeTicket(msg, ticketId, adminId) {
+  const tickets = loadTickets();
+  const ticketIndex = tickets.findIndex(t => t.id === ticketId);
+  
+  if (ticketIndex === -1) {
+    bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
+    return;
+  }
+
+  // Verifica che l'admin abbia i permessi (sia assegnato o sia admin)
+  if (tickets[ticketIndex].assignedTo !== adminId && tickets[ticketIndex].assignedTo !== null) {
+    bot.sendMessage(msg.chat.id, "❌ Puoi chiudere solo i ticket assegnati a te!");
+    return;
+  }
+
+  tickets[ticketIndex].status = 'closed';
+  tickets[ticketIndex].updatedAt = nowISO();
+  
+  saveTickets(tickets);
+
+  // Conferma all'admin
+  bot.sendMessage(
+    msg.chat.id,
+    `✅ <b>Ticket ${ticketId} chiuso!</b>`,
+    { 
+      ...supportMenu(true),
+      parse_mode: "HTML" 
+    }
+  );
+
+  // Notifica all'utente
+  bot.sendMessage(
+    tickets[ticketIndex].userId,
+    `🎫 <b>Il tuo ticket ${ticketId} è stato chiuso.</b>\n\nSe hai altri problemi, apri un nuovo ticket. Grazie!`,
+    { parse_mode: "HTML" }
+  );
+}
+
 // === WEBHOOK EXPRESS HANDLER ===
 app.post('/', (req, res) => {
   bot.processUpdate(req.body);
@@ -1273,9 +1537,6 @@ async function sendFootballInfo(msg, userId) {
     ...footballMenu(true, preferences.wantsFootballUpdates)
   });
 }
-
-// [RESTANTE CODICE PER I TICKET RIMANE INVARIATO...]
-// ... (le funzioni per i ticket rimangono uguali alla versione precedente)
 
 // === WEBHOOK SETUP ===
 bot.setWebHook(`${WEBHOOK_URL}`);
