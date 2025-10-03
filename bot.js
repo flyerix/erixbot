@@ -1543,4 +1543,4 @@ bot.setWebHook(`${WEBHOOK_URL}`);
 
 app.listen(PORT, () => {
   console.log(`Bot server listening on port ${PORT}`);
-})
+});
