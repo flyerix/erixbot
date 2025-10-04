@@ -662,6 +662,118 @@ function assignTicket(msg, ticketId, adminId, adminName) {
   );
 }
 
+// Invia una risposta dell'admin e imposta lo stato per la risposta dell'utente
+function sendAdminReply(msg, ticketId, replyText, adminName) {
+  const tickets = loadTickets();
+  const ticketIndex = tickets.findIndex(t => t.id === ticketId);
+  
+  if (ticketIndex === -1) {
+    bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
+    return;
+  }
+
+  // Aggiungi la risposta dell'admin
+  if (!tickets[ticketIndex].replies) {
+    tickets[ticketIndex].replies = [];
+  }
+  
+  tickets[ticketIndex].replies.push({
+    type: 'admin',
+    message: replyText,
+    timestamp: nowISO(),
+    adminName: adminName
+  });
+  
+  tickets[ticketIndex].updatedAt = nowISO();
+  tickets[ticketIndex].status = 'assigned'; // Cambia stato in "in lavorazione"
+  saveTickets(tickets);
+
+  // Conferma all'admin
+  bot.sendMessage(
+    msg.chat.id,
+    `✅ <b>Risposta inviata per il ticket ${ticketId}!</b>`,
+    { parse_mode: "HTML" }
+  );
+
+  // Invia la risposta all'utente con un pulsante per rispondere
+  const replyMessage = `🎫 <b>Risposta dal Supporto - Ticket ${ticketId}</b>\n\n${replyText}\n\nPuoi rispondere a questo messaggio utilizzando il pulsante qui sotto.`;
+  
+  bot.sendMessage(
+    tickets[ticketIndex].userId,
+    replyMessage,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Rispondi al Supporto", callback_data: `user_reply_${ticketId}` }],
+          [{ text: "📋 Vedi Ticket Completo", callback_data: `view_${ticketId}` }]
+        ]
+      }
+    }
+  );
+}
+
+// Invia una risposta dell'utente e imposta lo stato per la risposta dell'admin
+function sendUserReply(msg, ticketId, replyText) {
+  const tickets = loadTickets();
+  const ticketIndex = tickets.findIndex(t => t.id === ticketId);
+  
+  if (ticketIndex === -1) {
+    bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
+    return;
+  }
+
+  // Verifica che l'utente sia il proprietario del ticket
+  if (tickets[ticketIndex].userId !== msg.from.id) {
+    bot.sendMessage(msg.chat.id, "❌ Non puoi rispondere a questo ticket!");
+    return;
+  }
+
+  // Verifica che il ticket non sia chiuso
+  if (tickets[ticketIndex].status === 'closed') {
+    bot.sendMessage(msg.chat.id, "❌ Il ticket è chiuso, non puoi rispondere!");
+    return;
+  }
+
+  // Aggiungi la risposta dell'utente
+  if (!tickets[ticketIndex].replies) {
+    tickets[ticketIndex].replies = [];
+  }
+  
+  tickets[ticketIndex].replies.push({
+    type: 'user',
+    message: replyText,
+    timestamp: nowISO()
+  });
+  
+  tickets[ticketIndex].updatedAt = nowISO();
+  saveTickets(tickets);
+
+  // Conferma all'utente
+  bot.sendMessage(
+    msg.chat.id,
+    `✅ <b>Risposta inviata per il ticket ${ticketId}!</b>\n\nLo staff ti risponderà al più presto.`,
+    { parse_mode: "HTML" }
+  );
+
+  // Notifica all'admin con pulsante per rispondere
+  const adminMessage = `🎫 <b>Nuova risposta dal cliente - Ticket ${ticketId}</b>\n\n<b>Utente:</b> ${tickets[ticketIndex].userName}\n<b>Messaggio:</b>\n${replyText}`;
+  
+  bot.sendMessage(
+    ADMIN_ID,
+    adminMessage,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Rispondi al Cliente", callback_data: `reply_${ticketId}` }],
+          [{ text: "📋 Vedi Ticket Completo", callback_data: `view_${ticketId}` }]
+        ]
+      }
+    }
+  );
+}
+
 // Chiude un ticket
 function closeTicket(msg, ticketId, adminId) {
   const tickets = loadTickets();
@@ -1077,7 +1189,7 @@ bot.on('callback_query', async query => {
     userStates[userId] = { awaitingUserTicketReply: ticketId };
     bot.sendMessage(
       msg.chat.id,
-      `💬 <b>Rispondi al Ticket ${ticketId}</b>\n\nScrivi la tua risposta:`,
+      `💬 <b>Rispondi al Ticket ${ticketId}</b>\n\nScrivi la tua risposta per lo staff:`,
       { parse_mode: "HTML" }
     );
   }
@@ -1298,51 +1410,7 @@ ${r.note ? '📝 Note: ' + r.note : ''}
       return;
     }
     
-    const tickets = loadTickets();
-    const ticketIndex = tickets.findIndex(t => t.id === ticketId);
-    
-    if (ticketIndex === -1) {
-      bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
-      delete userStates[userId];
-      return;
-    }
-    
-    // Aggiungi la risposta
-    if (!tickets[ticketIndex].replies) {
-      tickets[ticketIndex].replies = [];
-    }
-    
-    tickets[ticketIndex].replies.push({
-      type: 'admin',
-      message: replyText,
-      timestamp: nowISO(),
-      adminName: msg.from.first_name
-    });
-    
-    tickets[ticketIndex].updatedAt = nowISO();
-    saveTickets(tickets);
-    
-    // Conferma all'admin
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ <b>Risposta inviata per il ticket ${ticketId}!</b>`,
-      { parse_mode: "HTML" }
-    );
-    
-    // Invia la risposta all'utente
-    bot.sendMessage(
-      tickets[ticketIndex].userId,
-      `🎫 <b>Risposta dal Supporto - Ticket ${ticketId}</b>\n\n${replyText}\n\nPuoi rispondere a questo messaggio aprendo il ticket dal menu Supporto.`,
-      {
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📋 Vedi Ticket", callback_data: `view_${ticketId}` }]
-          ]
-        }
-      }
-    );
-    
+    sendAdminReply(msg, ticketId, replyText, msg.from.first_name);
     delete userStates[userId];
     return;
   }
@@ -1357,64 +1425,7 @@ ${r.note ? '📝 Note: ' + r.note : ''}
       return;
     }
     
-    const tickets = loadTickets();
-    const ticketIndex = tickets.findIndex(t => t.id === ticketId);
-    
-    if (ticketIndex === -1) {
-      bot.sendMessage(msg.chat.id, "❌ Ticket non trovato!");
-      delete userStates[userId];
-      return;
-    }
-
-    // Verifica che l'utente sia il proprietario del ticket
-    if (tickets[ticketIndex].userId !== userId) {
-      bot.sendMessage(msg.chat.id, "❌ Non puoi rispondere a questo ticket!");
-      delete userStates[userId];
-      return;
-    }
-
-    // Verifica che il ticket non sia chiuso
-    if (tickets[ticketIndex].status === 'closed') {
-      bot.sendMessage(msg.chat.id, "❌ Il ticket è chiuso, non puoi rispondere!");
-      delete userStates[userId];
-      return;
-    }
-    
-    // Aggiungi la risposta dell'utente
-    if (!tickets[ticketIndex].replies) {
-      tickets[ticketIndex].replies = [];
-    }
-    
-    tickets[ticketIndex].replies.push({
-      type: 'user',
-      message: replyText,
-      timestamp: nowISO()
-    });
-    
-    tickets[ticketIndex].updatedAt = nowISO();
-    saveTickets(tickets);
-    
-    // Conferma all'utente
-    bot.sendMessage(
-      msg.chat.id,
-      `✅ <b>Risposta inviata per il ticket ${ticketId}!</b>`,
-      { parse_mode: "HTML" }
-    );
-    
-    // Notifica all'admin
-    bot.sendMessage(
-      ADMIN_ID,
-      `🎫 <b>Nuova risposta dal cliente - Ticket ${ticketId}</b>\n\n<b>Utente:</b> ${tickets[ticketIndex].userName}\n<b>Messaggio:</b>\n${replyText}`,
-      {
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📋 Vedi Ticket", callback_data: `view_${ticketId}` }]
-          ]
-        }
-      }
-    );
-    
+    sendUserReply(msg, ticketId, replyText);
     delete userStates[userId];
     return;
   }
