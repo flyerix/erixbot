@@ -56,6 +56,28 @@ def escape_html(text):
         .replace('>', '&gt;')
     )
 
+def safe_edit_message(query, text, reply_markup=None, parse_mode='HTML'):
+    """Modifica sicura di un messaggio che gestisce l'errore 'Message is not modified'"""
+    try:
+        return query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        if "Message is not modified" in str(e):
+            # Ignora l'errore se il messaggio non è cambiato
+            return None
+        else:
+            raise e
+
+def safe_reply(update, text, reply_markup=None, parse_mode='HTML'):
+    """Risposta sicura che gestisce sia messaggi che callback query"""
+    try:
+        if update.callback_query:
+            return update.callback_query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        else:
+            return update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        logger.error(f"Error in safe_reply: {e}")
+        return None
+
 # ==================== HANDLER COMANDI ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler comando /help"""
     try:
-        query = update.callback_query if hasattr(update, 'callback_query') else None
+        query = update.callback_query
         if query:
             await query.answer()
 
@@ -130,13 +152,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if query:
-            await query.edit_message_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
+            await safe_edit_message(query, help_text, reply_markup, 'HTML')
         else:
             await update.message.reply_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
 
     except Exception as e:
         logger.error(f"Errore in help_command: {e}")
-        await update.message.reply_text("❌ Errore nel caricamento della guida.")
+        error_text = "❌ Errore nel caricamento della guida."
+        await safe_reply(update, error_text)
 
 async def new_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Crea nuovo ticket"""
@@ -324,6 +347,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Errore in handle_message: {e}")
         await update.message.reply_text("❌ Errore nell'elaborazione del messaggio.")
 
+# ==================== GESTIONE CALLBACK QUERIES ====================
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce tutte le callback queries"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        action = query.data
+        
+        if action == 'help':
+            await help_command(update, context)
+        elif action == 'help_ticket':
+            await safe_edit_message(query, "📝 Per aprire un ticket usa: /ticket <descrizione del problema>")
+        elif action == 'help_cerca':
+            await safe_edit_message(query, "🔍 Per cercare una lista usa: /cerca <nome lista> oppure scrivi direttamente il nome della lista")
+        elif action == 'help_miei_ticket':
+            await safe_edit_message(query, "📋 Per vedere i tuoi ticket usa: /miei_ticket")
+        elif action == 'help_admin':
+            await safe_edit_message(query, "🔧 Per accedere al pannello admin usa: /admin")
+        else:
+            await safe_edit_message(query, "❌ Azione non riconosciuta")
+            
+    except Exception as e:
+        logger.error(f"Errore in handle_callback_query: {e}")
+        try:
+            await query.edit_message_text("❌ Errore nell'elaborazione della richiesta")
+        except:
+            pass
+
 # ==================== HEALTH CHECK ====================
 
 from flask import Flask
@@ -381,7 +434,7 @@ def main():
         application.add_handler(CommandHandler("admin", admin_panel))
 
         # Handler callback queries
-        application.add_handler(CallbackQueryHandler(help_command, pattern='^help'))
+        application.add_handler(CallbackQueryHandler(handle_callback_query))
 
         # Handler messaggi normali
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
