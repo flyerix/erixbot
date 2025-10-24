@@ -1,0 +1,42 @@
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# File di debug/risoluzione
+*.txt
+!*README.md
+!*requirements.txt
+
+# File di test temporanei
+test_*.py
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database locale
+*.db
+*.sqlite
+*.sqlite3
