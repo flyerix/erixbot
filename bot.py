@@ -15,7 +15,7 @@ import functools
 from datetime import datetime, timedelta
 from collections import defaultdict
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputTextMessageContent
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputTextMessageContent, InlineQueryResultArticle
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     InlineQueryHandler, ContextTypes, filters
@@ -119,11 +119,11 @@ def track_metrics(func):
         try:
             result = await func(update, context, *args, **kwargs)
             execution_time = time.time() - start_time
-            logger.info(f"{func.__name__} executed in {execution_time:.2f}s")
+            safe_log('info', f"{func.__name__} executed in {execution_time:.2f}s")
             return result
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"{func.__name__} failed after {execution_time:.2f}s: {e}")
+            safe_log('error', f"{func.__name__} failed after {execution_time:.2f}s: {e}")
             raise
     return wrapper
 
@@ -153,13 +153,18 @@ def safe_log(level, message):
         # Ultima risorsa - usa sempre print
         print(f"LOG ERROR: {message}")
 
-def escape_markdown(text: str) -> str:
-    """Escape caratteri speciali per MarkdownV2"""
-    if not text:
-        return ""
-    # Caratteri da escapare in MarkdownV2
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return "".join(f"\\{c}" if c in escape_chars else c for c in text)
+async def notify_admins(bot, message: str):
+    """Invia notifica a tutti gli admin"""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            # Usa print invece di safe_log per evitare ricorsione
+            print(f"ERROR: Failed to notify admin {admin_id}: {e}")
 
 # ==================== GESTIONE ERRORI ====================
 
@@ -321,7 +326,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(help_text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in show_help: {e}")
+        safe_log('error', f"Error in show_help: {e}")
         await (query.message if query else update.message).reply_text("❌ Errore nel caricamento della guida.")
 
 # ==================== FIRESTICK OFFERS ====================
@@ -382,7 +387,7 @@ Seleziona un'azione:
             await update.message.reply_text(text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in firestick_offers_cmd: {e}")
+        safe_log('error', f"Error in firestick_offers_cmd: {e}")
 
 # ==================== TICKET SYSTEM ====================
 
@@ -425,7 +430,7 @@ async def new_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Ticket #{ticket_id} creato!\n\n📝 Descrizione: {description}\n⏰ Un admin ti risponderà presto.")
 
     except Exception as e:
-        logger.error(f"Error in new_ticket: {e}")
+        safe_log('error', f"Error in new_ticket: {e}")
         await update.message.reply_text("❌ Errore nella creazione del ticket.")
 
 async def my_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -463,7 +468,7 @@ async def my_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode='MarkdownV2')
 
     except Exception as e:
-        logger.error(f"Error in my_tickets: {e}")
+        safe_log('error', f"Error in my_tickets: {e}")
         await update.message.reply_text("❌ Errore nel caricamento dei ticket.")
 
 # ==================== SEARCH SYSTEM ====================
@@ -512,7 +517,7 @@ async def search_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_search_results(update, context, results, query)
 
     except Exception as e:
-        logger.error(f"Error in search_list: {e}")
+        safe_log('error', f"Error in search_list: {e}")
         await (query.message if query else update.message).reply_text("❌ Errore nella ricerca.")
 
 async def show_list_details(update: Update, context: ContextTypes.DEFAULT_TYPE, list_data, query=None):
@@ -654,7 +659,7 @@ async def reminder_prefs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in reminder_prefs: {e}")
+        safe_log('error', f"Error in reminder_prefs: {e}")
         await update.message.reply_text("❌ Errore nel caricamento delle preferenze.")
 
 # ==================== ADMIN PANEL ====================
@@ -689,7 +694,7 @@ Seleziona l'area di gestione:
             await update.message.reply_text(text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_menu: {e}")
+        safe_log('error', f"Error in handle_admin_menu: {e}")
 
 # ==================== SISTEMA BLACKLIST/WHITELIST ====================
 @admin_required
@@ -723,7 +728,7 @@ Seleziona l'azione da eseguire:
             await update.message.reply_text(text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in handle_user_management: {e}")
+        safe_log('error', f"Error in handle_user_management: {e}")
 
 @admin_required
 @track_metrics
@@ -746,7 +751,7 @@ Oppure inoltra un messaggio dell'utente per estrarre automaticamente l'ID.
         await query.edit_message_text(text, parse_mode='MarkdownV2')
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_blacklist: {e}")
+        safe_log('error', f"Error in handle_admin_blacklist: {e}")
 
 @admin_required
 @track_metrics
@@ -769,7 +774,7 @@ Oppure inoltra un messaggio dell'utente per estrarre automaticamente l'ID.
         await query.edit_message_text(text, parse_mode='MarkdownV2')
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_whitelist: {e}")
+        safe_log('error', f"Error in handle_admin_whitelist: {e}")
 
 async def handle_admin_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestisce input admin per blacklist/whitelist"""
@@ -803,7 +808,7 @@ async def handle_admin_user_input(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(f"📝 Inserisci il motivo per {action_text} l'utente (opzionale):")
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_user_input: {e}")
+        safe_log('error', f"Error in handle_admin_user_input: {e}")
         await update.message.reply_text("❌ Errore nell'elaborazione della richiesta.")
 
 async def handle_admin_reason_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -841,7 +846,7 @@ async def handle_admin_reason_input(update: Update, context: ContextTypes.DEFAUL
             del context.user_data['target_username']
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_reason_input: {e}")
+        safe_log('error', f"Error in handle_admin_reason_input: {e}")
         await update.message.reply_text("❌ Errore nell'elaborazione del motivo.")
 
 async def handle_admin_duration_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -885,7 +890,7 @@ async def handle_admin_duration_input(update: Update, context: ContextTypes.DEFA
         del context.user_data['admin_input_step']
 
     except Exception as e:
-        logger.error(f"Error in handle_admin_duration_input: {e}")
+        safe_log('error', f"Error in handle_admin_duration_input: {e}")
 # ==================== SISTEMA ANTI-SPAM AVANZATO ====================
 class AdvancedRateLimiter:
     """Sistema anti-spam avanzato con più livelli di controllo"""
@@ -1043,7 +1048,7 @@ def enhanced_spam_check(func):
         is_spam, reason, action = advanced_rate_limiter.is_spam(user_id, command, message_text)
 
         if is_spam:
-            logger.warning(f"Spam detected for user {user_id}: {reason}")
+            safe_log('warning', f"Spam detected for user {user_id}: {reason}")
 
             # Aggiungi warning
             was_blacklisted = advanced_rate_limiter.add_warning(user_id)
@@ -1158,7 +1163,7 @@ async def handle_inline_search(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.inline_query.answer(results, cache_time=60)
 
     except Exception as e:
-        logger.error(f"Error in handle_inline_search: {e}")
+        safe_log('error', f"Error in handle_inline_search: {e}")
 
 # ==================== SISTEMA UNDO/REDO ====================
 @admin_required
@@ -1181,7 +1186,7 @@ async def handle_undo_operation(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text("❌ Nessuna operazione da annullare.")
 
     except Exception as e:
-        logger.error(f"Error in handle_undo_operation: {e}")
+        safe_log('error', f"Error in handle_undo_operation: {e}")
 
 async def handle_preview_changes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mostra preview delle modifiche prima di applicarle"""
@@ -1217,7 +1222,7 @@ async def handle_preview_changes(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(preview_text, parse_mode='MarkdownV2', reply_markup=reply_markup)
 
     except Exception as e:
-        logger.error(f"Error in handle_preview_changes: {e}")
+        safe_log('error', f"Error in handle_preview_changes: {e}")
 
 # ==================== GESTIONE MESSAGGI MIGLIORATA ====================
 async def handle_message_improved(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1235,7 +1240,7 @@ async def handle_message_improved(update: Update, context: ContextTypes.DEFAULT_
         is_spam, reason, action = advanced_rate_limiter.is_spam(user_id, 'message', message_text)
 
         if is_spam:
-            logger.warning(f"Spam detected for user {user_id}: {reason}")
+            safe_log('warning', f"Spam detected for user {user_id}: {reason}")
 
             # Aggiungi warning
             was_blacklisted = advanced_rate_limiter.add_warning(user_id)
@@ -1276,7 +1281,7 @@ async def handle_message_improved(update: Update, context: ContextTypes.DEFAULT_
         await process_message_with_ai(update, context)
 
     except Exception as e:
-        logger.error(f"Error in handle_message_improved: {e}")
+        safe_log('error', f"Error in handle_message_improved: {e}")
         await update.message.reply_text("❌ Errore nell'elaborazione del messaggio.")
 
 async def process_message_with_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1301,7 +1306,7 @@ async def process_message_with_ai(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text("📨 Messaggio ricevuto! Un admin ti risponderà al più presto.")
 
     except Exception as e:
-        logger.error(f"Error in process_message_with_ai: {e}")
+        safe_log('error', f"Error in process_message_with_ai: {e}")
 
 def find_best_template(message_text: str):
     """Trova template più appropriato per il messaggio"""
@@ -1370,7 +1375,7 @@ Rispondi in modo utile e professionale. Se non puoi risolvere il problema, sugge
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        logger.error(f"Error generating AI response: {e}")
+        safe_log('error', f"Error generating AI response: {e}")
         return None
 
 # ==================== DECORATORI MIGLIORATI ====================
@@ -1403,7 +1408,7 @@ def with_undo_redo(operation_type: str, table_name: str):
                 return result
 
             except Exception as e:
-                logger.error(f"Error in {func.__name__}: {e}")
+                safe_log('error', f"Error in {func.__name__}: {e}")
                 raise
 
         return wrapper
@@ -1459,8 +1464,8 @@ def main():
         application.add_handler(CommandHandler("firestick", firestick_offers_cmd))
 
         # Handler per callback queries
-        application.add_handler(CallbackQueryHandler(handle_callback_help, pattern='^help$'))
-        application.add_handler(CallbackQueryHandler(handle_admin_menu, pattern='^admin_menu$'))
+        application.add_handler(CallbackQueryHandler(show_help, pattern='^help$'))
+        application.add_handler(CallbackQueryHandler(list_management, pattern='^admin_menu$'))
 
         # Handler per le nuove funzionalità
         application.add_handler(CallbackQueryHandler(handle_user_management, pattern='^admin_user_management$'))
