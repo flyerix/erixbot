@@ -145,34 +145,6 @@ except ImportError as e:
     def check_database_connection():
         return False
 
-    # Definisci altre funzioni fallback necessarie
-    def get_user_restrictions(user_id):
-        return []
-    
-    def add_user_restriction(user_id, restriction_type, reason=None, admin_id=None, expires_at=None):
-        pass
-    
-    def remove_user_restriction(user_id, restriction_type):
-        pass
-    
-    def check_user_restriction(user_id, restriction_type):
-        return False
-    
-    def undo_last_operation(user_id):
-        return None
-    
-    def log_operation(user_id, operation_type, table_name, record_id, old_values, new_values):
-        pass
-    
-    def get_command_suggestions(partial, limit):
-        return []
-    
-    def update_command_usage(command):
-        pass
-    
-    def get_list_suggestions(partial, limit):
-        return []
-
 # ==================== DECORATORI ====================
 
 def admin_required(func):
@@ -220,7 +192,8 @@ async def notify_admins(bot, message: str):
                 parse_mode='Markdown'
             )
         except Exception as e:
-            safe_log('error', f"Failed to notify admin {admin_id}: {e}")
+            # Usa print invece di safe_log per evitare ricorsione
+            print(f"ERROR: Failed to notify admin {admin_id}: {e}")
 
 # ==================== GESTIONE ERRORI ====================
 
@@ -228,7 +201,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestisce errori globali del bot"""
     error_msg = f"Exception while handling an update: {context.error}"
 
-    # Logging sicuro
+    # Logging sicuro - gestisci caso logger None
     safe_log('error', error_msg)
 
     error_message = "Si è verificato un errore imprevisto. Riprova più tardi o contatta un admin."
@@ -269,15 +242,6 @@ def setup_uptime_monitor():
     monitor.start()
     return monitor
 
-# ==================== FUNZIONI AUSILIARIE ====================
-
-def escape_markdown(text: str) -> str:
-    """Escape caratteri speciali per MarkdownV2"""
-    if not text:
-        return ""
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
-
 # ==================== FUNZIONI START ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -307,7 +271,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Messaggio di benvenuto
         welcome_text = f"""
-👋 Ciao {escape_markdown(user.full_name)}!
+👋 Ciao {user.full_name}!
 
 🎉 *Benvenuto nel bot di supporto!*
 
@@ -527,16 +491,23 @@ async def my_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "📋 *I Tuoi Ticket:*\n\n"
         for ticket_id, subject, status, created_at in tickets:
             status_emoji = {"open": "🔴", "in_progress": "🟡", "closed": "🟢"}.get(status, "⚪")
-            text += f"{status_emoji} *#{ticket_id}* - {escape_markdown(subject)}\n"
+            text += f"{status_emoji} *#{ticket_id}* - {subject}\n"
             text += f"   📅 {created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
 
-        await update.message.reply_text(text, parse_mode='MarkdownV2')
+        await update.message.reply_text(text, parse_mode='Markdown')
 
     except Exception as e:
         safe_log('error', f"Error in my_tickets: {e}")
         await update.message.reply_text("❌ Errore nel caricamento dei ticket.")
 
 # ==================== SEARCH SYSTEM ====================
+
+def escape_markdown(text):
+    """Escape dei caratteri speciali Markdown"""
+    if not text:
+        return ""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return ''.join(f'\\{char}' if char in escape_chars else char for char in str(text))
 
 async def search_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cerca una lista per nome"""
@@ -593,9 +564,9 @@ async def show_list_details(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id = update.effective_user.id
 
     conn = get_db_connection()
-        cur = conn.cursor()
+    cur = conn.cursor()
 
-        cur.execute("""
+    cur.execute("""
         SELECT notification_days
         FROM list_subscriptions
         WHERE user_id = (SELECT id FROM users WHERE telegram_id = %s)
@@ -955,6 +926,7 @@ async def handle_admin_duration_input(update: Update, context: ContextTypes.DEFA
 
     except Exception as e:
         safe_log('error', f"Error in handle_admin_duration_input: {e}")
+
 # ==================== SISTEMA ANTI-SPAM AVANZATO ====================
 class AdvancedRateLimiter:
     """Sistema anti-spam avanzato con più livelli di controllo"""
@@ -1216,7 +1188,7 @@ async def handle_inline_search(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
             )
 
-        # Se non ci sono risultati, mostra un messaggio de help
+        # Se non ci sono risultati, mostra un messaggio di help
         if not results:
             results.append(
                 InlineQueryResultArticle(
@@ -1488,14 +1460,21 @@ def main():
     try:
         safe_log('info', "🚀 Avvio bot Telegram...")
 
+        # Verifica configurazione base
         if not TOKEN:
             safe_log('error', "❌ Token del bot non configurato")
             return
 
         safe_log('info', "✅ Configurazione base verificata")
 
-        if not check_database_connection():
-            safe_log('error', "❌ Impossibile connettersi al database all'avvio")
+        # Prova a connettere al database
+        try:
+            db_connected = check_database_connection()
+            if not db_connected:
+                safe_log('error', "❌ Impossibile connettersi al database all'avvio")
+                return
+        except Exception as e:
+            safe_log('error', f"❌ Errore nella connessione al database: {e}")
             return
 
         safe_log('info', "✅ Connessione database verificata")
@@ -1507,17 +1486,24 @@ def main():
         safe_log('info', "✅ Database inizializzato")
 
         # Verifica estensioni database necessarie
-        if not check_database_extensions():
-            safe_log('warning', "⚠️ Alcune estensioni database mancanti. La ricerca intelligente potrebbe non funzionare correttamente.")
+        try:
+            if not check_database_extensions():
+                safe_log('warning', "⚠️ Alcune estensioni database mancanti. La ricerca intelligente potrebbe non funzionare correttamente.")
+        except Exception as e:
+            safe_log('warning', f"⚠️ Impossibile verificare estensioni database: {e}")
 
         # Avvia Flask in un thread separato per health checks
         if RENDER:
-            flask_thread = threading.Thread(target=start_flask_app, daemon=True)
-            flask_thread.start()
-            safe_log('info', "🌐 Server Health Check avviato sulla porta 5000")
+            try:
+                flask_thread = threading.Thread(target=start_flask_app, daemon=True)
+                flask_thread.start()
+                safe_log('info', "🌐 Server Health Check avviato sulla porta 5000")
 
-            # Avvia il servizio di ping continuo
-            uptime_monitor = setup_uptime_monitor()
+                # Avvia il servizio di ping continuo
+                uptime_monitor = setup_uptime_monitor()
+                safe_log('info', "🔄 Uptime monitor avviato")
+            except Exception as e:
+                safe_log('error', f"❌ Errore nell'avvio dei servizi di supporto: {e}")
 
         # Crea applicazione bot
         application = Application.builder().token(TOKEN).build()
@@ -1574,7 +1560,7 @@ def main():
             application.run_polling()
 
     except Exception as e:
-        # Fallback logging - NON usare logger qui perché potrebbe non essere disponibile
+        # Fallback logging - usa solo print per sicurezza
         error_msg = f"ERRORE CRITICO nell'avvio del bot: {e}\n{traceback.format_exc()}"
         print(error_msg)
         print("ATTENZIONE: Impossibile scrivere nel log di errore - usa solo console output")
