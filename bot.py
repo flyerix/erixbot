@@ -18,7 +18,8 @@ from database import (
     check_user_restriction, add_user_restriction, remove_user_restriction,
     create_or_update_user, get_user_by_telegram_id, create_ticket,
     get_user_tickets, search_lists, get_command_suggestions,
-    update_command_usage, get_list_suggestions
+    update_command_usage, get_list_suggestions, get_user_restrictions,
+    get_database_stats
 )
 
 # ==================== CONFIGURAZIONE ====================
@@ -291,15 +292,195 @@ Seleziona l'area di gestione:
             [InlineKeyboardButton("🎫 Gestione Ticket", callback_data='admin_tickets')],
             [InlineKeyboardButton("📋 Gestione Liste", callback_data='admin_lists')],
             [InlineKeyboardButton("🔒 Gestione Utenti", callback_data='admin_users')],
-            [InlineKeyboardButton("📊 Dashboard", callback_data='admin_dashboard')]
+            [InlineKeyboardButton("📊 Dashboard", callback_data='admin_dashboard')],
+            [InlineKeyboardButton("🔙 Menu Principale", callback_data='help')]
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
+        
+        if update.callback_query:
+            await safe_edit_message(update.callback_query, text, reply_markup, 'HTML')
+        else:
+            await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
 
     except Exception as e:
         logger.error(f"Errore in admin_panel: {e}")
-        await update.message.reply_text("❌ Errore nel caricamento del pannello admin.")
+        await safe_reply(update, "❌ Errore nel caricamento del pannello admin.")
+
+async def admin_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Dashboard admin con statistiche"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        # Ottieni statistiche database
+        stats = get_database_stats()
+        
+        text = f"""
+📊 <b>Dashboard Admin</b>
+
+👥 <b>Statistiche Utenti:</b>
+• Utenti totali: {stats.get('users', 0)}
+• Ticket aperti: {stats.get('tickets', 0)}
+• Liste nel sistema: {stats.get('lists', 0)}
+• Messaggi ticket: {stats.get('ticket_messages', 0)}
+
+💾 <b>Database:</b>
+• Dimensione: {stats.get('db_size', 'N/A')}
+
+🔧 <b>Azioni Rapide:</b>
+        """
+
+        keyboard = [
+            [InlineKeyboardButton("🔄 Aggiorna Statistiche", callback_data='admin_dashboard')],
+            [InlineKeyboardButton("👥 Gestione Utenti", callback_data='admin_users')],
+            [InlineKeyboardButton("🎫 Gestione Ticket", callback_data='admin_tickets')],
+            [InlineKeyboardButton("🔙 Torna al Pannello", callback_data='admin_menu')]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await safe_edit_message(query, text, reply_markup, 'HTML')
+
+    except Exception as e:
+        logger.error(f"Errore in admin_dashboard: {e}")
+        await query.edit_message_text("❌ Errore nel caricamento della dashboard.")
+
+async def admin_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestione utenti admin"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        # Ottieni restrizioni utenti
+        restrictions = get_user_restrictions(limit=10)
+        
+        text = """
+🔒 <b>Gestione Utenti - Admin Panel</b>
+
+Seleziona l'azione da eseguire:
+        """
+
+        keyboard = [
+            [InlineKeyboardButton("🚫 Blacklist Utente", callback_data='admin_blacklist')],
+            [InlineKeyboardButton("✅ Whitelist Utente", callback_data='admin_whitelist')],
+            [InlineKeyboardButton("📋 Lista Restrizioni", callback_data='admin_restrictions_list')],
+        ]
+        
+        if restrictions:
+            text += f"\n📋 <b>Ultime restrizioni ({len(restrictions)}):</b>\n"
+            for restriction in restrictions[:3]:  # Mostra solo prime 3
+                status = "🟢 Attiva" if restriction['is_active'] else "🔴 Inattiva"
+                text += f"• {restriction['restriction_type']} - User {restriction['telegram_id']} - {status}\n"
+            keyboard.append([InlineKeyboardButton("📋 Vedi Tutte le Restrizioni", callback_data='admin_restrictions_list')])
+
+        keyboard.extend([
+            [InlineKeyboardButton("📊 Dashboard", callback_data='admin_dashboard')],
+            [InlineKeyboardButton("🔙 Torna al Pannello", callback_data='admin_menu')]
+        ])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await safe_edit_message(query, text, reply_markup, 'HTML')
+
+    except Exception as e:
+        logger.error(f"Errore in admin_users: {e}")
+        await query.edit_message_text("❌ Errore nel caricamento della gestione utenti.")
+
+async def admin_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestione ticket admin"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        text = """
+🎫 <b>Gestione Ticket - Admin Panel</b>
+
+Funzionalità di gestione ticket:
+
+• Visualizza tutti i ticket aperti
+• Rispondi ai ticket
+• Chiudi ticket risolti
+• Assegna priorità
+
+<code>🚧 Funzionalità in sviluppo</code>
+        """
+
+        keyboard = [
+            [InlineKeyboardButton("📋 Ticket Aperti", callback_data='admin_tickets_open')],
+            [InlineKeyboardButton("📊 Dashboard", callback_data='admin_dashboard')],
+            [InlineKeyboardButton("🔙 Torna al Pannello", callback_data='admin_menu')]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await safe_edit_message(query, text, reply_markup, 'HTML')
+
+    except Exception as e:
+        logger.error(f"Errore in admin_tickets: {e}")
+        await query.edit_message_text("❌ Errore nel caricamento della gestione ticket.")
+
+async def admin_lists(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestione liste admin"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        text = """
+📋 <b>Gestione Liste - Admin Panel</b>
+
+Funzionalità di gestione liste:
+
+• Aggiungi nuove liste
+• Modifica liste esistenti
+• Gestisci scadenze
+• Notifiche utenti
+
+<code>🚧 Funzionalità in sviluppo</code>
+        """
+
+        keyboard = [
+            [InlineKeyboardButton("➕ Aggiungi Lista", callback_data='admin_list_add')],
+            [InlineKeyboardButton("📊 Dashboard", callback_data='admin_dashboard')],
+            [InlineKeyboardButton("🔙 Torna al Pannello", callback_data='admin_menu')]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await safe_edit_message(query, text, reply_markup, 'HTML')
+
+    except Exception as e:
+        logger.error(f"Errore in admin_lists: {e}")
+        await query.edit_message_text("❌ Errore nel caricamento della gestione liste.")
+
+async def admin_restrictions_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista delle restrizioni utenti"""
+    try:
+        query = update.callback_query
+        await query.answer()
+
+        restrictions = get_user_restrictions(limit=20)
+        
+        if not restrictions:
+            text = "📋 <b>Nessuna restrizione utente attiva</b>"
+        else:
+            text = "📋 <b>Restrizioni Utenti Attive:</b>\n\n"
+            for restriction in restrictions:
+                status_emoji = "🟢" if restriction['is_active'] else "🔴"
+                expires = restriction['expires_at'].strftime('%d/%m/%Y') if restriction['expires_at'] else "Permanente"
+                text += f"{status_emoji} <b>{restriction['restriction_type'].upper()}</b>\n"
+                text += f"User ID: {restriction['telegram_id']}\n"
+                text += f"Motivo: {restriction['reason'] or 'Nessuno'}\n"
+                text += f"Scadenza: {expires}\n"
+                text += f"Data: {restriction['created_at'].strftime('%d/%m/%Y')}\n\n"
+
+        keyboard = [
+            [InlineKeyboardButton("🔒 Gestione Utenti", callback_data='admin_users')],
+            [InlineKeyboardButton("🔙 Torna al Pannello", callback_data='admin_menu')]
+        ]
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await safe_edit_message(query, text, reply_markup, 'HTML')
+
+    except Exception as e:
+        logger.error(f"Errore in admin_restrictions_list: {e}")
+        await query.edit_message_text("❌ Errore nel caricamento delle restrizioni.")
 
 # ==================== GESTIONE MESSAGGI ====================
 
@@ -357,6 +538,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         action = query.data
         
+        # Help commands
         if action == 'help':
             await help_command(update, context)
         elif action == 'help_ticket':
@@ -367,6 +549,23 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await safe_edit_message(query, "📋 Per vedere i tuoi ticket usa: /miei_ticket")
         elif action == 'help_admin':
             await safe_edit_message(query, "🔧 Per accedere al pannello admin usa: /admin")
+        
+        # Admin commands
+        elif action == 'admin_menu':
+            await admin_panel(update, context)
+        elif action == 'admin_dashboard':
+            await admin_dashboard(update, context)
+        elif action == 'admin_users':
+            await admin_users(update, context)
+        elif action == 'admin_tickets':
+            await admin_tickets(update, context)
+        elif action == 'admin_lists':
+            await admin_lists(update, context)
+        elif action == 'admin_restrictions_list':
+            await admin_restrictions_list(update, context)
+        elif action in ['admin_blacklist', 'admin_whitelist', 'admin_tickets_open', 'admin_list_add']:
+            await safe_edit_message(query, "🛠️ <b>Funzionalità in sviluppo</b>\n\nQuesta funzionalità sarà disponibile prossimamente.")
+        
         else:
             await safe_edit_message(query, "❌ Azione non riconosciuta")
             
