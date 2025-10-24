@@ -138,17 +138,9 @@ def rate_limit(func):
 def safe_log(level, message):
     """Logging sicuro che non causa errori su Render"""
     try:
-        if logger is not None:
-            if level == 'info':
-                logger.info(message)
-            elif level == 'warning':
-                logger.warning(message)
-            elif level == 'error':
-                logger.error(message)
-            else:
-                logger.info(message)
-        else:
-            print(f"{level.upper()}: {message}")
+        # Usa sempre print per evitare problemi con il logger globale
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(f"{timestamp} - {level.upper()} - {message}")
     except:
         # Ultima risorsa - usa sempre print
         print(f"LOG ERROR: {message}")
@@ -1419,11 +1411,6 @@ def with_undo_redo(operation_type: str, table_name: str):
 def main():
     """Funzione principale del bot"""
     try:
-        # Verifica che logger sia disponibile
-        if logger is None:
-            print("ERRORE: Logger non inizializzato")
-            return
-
         safe_log('info', "🚀 Avvio bot Telegram...")
 
         if not check_database_connection():
