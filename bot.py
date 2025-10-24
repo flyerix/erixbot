@@ -12,6 +12,7 @@ import logging
 import asyncio
 import threading
 import functools
+import traceback
 from datetime import datetime, timedelta
 from collections import defaultdict
 import re
@@ -30,36 +31,60 @@ import requests
 from bs4 import BeautifulSoup
 import openai
 
-# Project imports
-from database import (
-    get_db_connection, init_database, check_database_connection,
-    check_database_extensions, get_user_restrictions, add_user_restriction,
-    remove_user_restriction, check_user_restriction, undo_last_operation,
-    log_operation, get_command_suggestions, update_command_usage,
-    get_list_suggestions
-)
+# ==================== CONFIGURAZIONE LOGGING SICURA ====================
 
-from backup_manager import BackupManager
+def setup_logger():
+    """Configura il logger in modo sicuro per Render"""
+    try:
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
 
-# ==================== CONFIGURAZIONE ====================
+        # Rimuovi handler esistenti per evitare duplicati
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
 
-# Inizializzazione logging sicura per Render
-logger = None  # Inizializzazione di default
-try:
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-
-    # Crea console handler se non esistono handler
-    if not logger.handlers:
+        # Console handler
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-except Exception:
-    # Fallback se logging non funziona
-    logger = None
+        logger.propagate = False
+        return logger
+    except Exception as e:
+        # Fallback - usa solo print
+        print(f"ERROR: Impossibile configurare il logger: {e}")
+        return None
+
+# Inizializza logger
+logger = setup_logger()
+
+def safe_log(level, message):
+    """Logging sicuro che non causa errori"""
+    try:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_message = f"{timestamp} - {level.upper()} - {message}"
+        
+        if logger:
+            if level == 'info':
+                logger.info(message)
+            elif level == 'warning':
+                logger.warning(message)
+            elif level == 'error':
+                logger.error(message)
+            elif level == 'debug':
+                logger.debug(message)
+            else:
+                logger.info(message)
+        else:
+            # Fallback a print se logger non è disponibile
+            print(log_message)
+    except Exception as e:
+        # Ultima risorsa - usa sempre print
+        print(f"LOG ERROR: {message} - {e}")
+
+# ==================== CONFIGURAZIONE ====================
 
 # Caricamento configurazione
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -98,6 +123,56 @@ AI_TEMPLATES = {
     }
 }
 
+# Importa moduli di progetto DOPO la configurazione del logger
+try:
+    from database import (
+        get_db_connection, init_database, check_database_connection,
+        check_database_extensions, get_user_restrictions, add_user_restriction,
+        remove_user_restriction, check_user_restriction, undo_last_operation,
+        log_operation, get_command_suggestions, update_command_usage,
+        get_list_suggestions
+    )
+    from backup_manager import BackupManager
+except ImportError as e:
+    safe_log('error', f"Errore nell'importazione dei moduli: {e}")
+    # Definisci funzioni fallback per evitare errori
+    def get_db_connection():
+        raise Exception("Database non disponibile")
+    
+    def init_database():
+        return False
+    
+    def check_database_connection():
+        return False
+
+    # Definisci altre funzioni fallback necessarie
+    def get_user_restrictions(user_id):
+        return []
+    
+    def add_user_restriction(user_id, restriction_type, reason=None, admin_id=None, expires_at=None):
+        pass
+    
+    def remove_user_restriction(user_id, restriction_type):
+        pass
+    
+    def check_user_restriction(user_id, restriction_type):
+        return False
+    
+    def undo_last_operation(user_id):
+        return None
+    
+    def log_operation(user_id, operation_type, table_name, record_id, old_values, new_values):
+        pass
+    
+    def get_command_suggestions(partial, limit):
+        return []
+    
+    def update_command_usage(command):
+        pass
+    
+    def get_list_suggestions(partial, limit):
+        return []
+
 # ==================== DECORATORI ====================
 
 def admin_required(func):
@@ -135,16 +210,6 @@ def rate_limit(func):
         return await func(update, context, *args, **kwargs)
     return wrapper
 
-def safe_log(level, message):
-    """Logging sicuro che non causa errori su Render"""
-    try:
-        # Usa sempre print per evitare problemi con il logger globale
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        print(f"{timestamp} - {level.upper()} - {message}")
-    except:
-        # Ultima risorsa - usa sempre print
-        print(f"LOG ERROR: {message}")
-
 async def notify_admins(bot, message: str):
     """Invia notifica a tutti gli admin"""
     for admin_id in ADMIN_IDS:
@@ -155,8 +220,7 @@ async def notify_admins(bot, message: str):
                 parse_mode='Markdown'
             )
         except Exception as e:
-            # Usa print invece di safe_log per evitare ricorsione
-            print(f"ERROR: Failed to notify admin {admin_id}: {e}")
+            safe_log('error', f"Failed to notify admin {admin_id}: {e}")
 
 # ==================== GESTIONE ERRORI ====================
 
@@ -164,7 +228,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestisce errori globali del bot"""
     error_msg = f"Exception while handling an update: {context.error}"
 
-    # Logging sicuro - gestisci caso logger None
+    # Logging sicuro
     safe_log('error', error_msg)
 
     error_message = "Si è verificato un errore imprevisto. Riprova più tardi o contatta un admin."
@@ -204,6 +268,15 @@ def setup_uptime_monitor():
     monitor = threading.Thread(target=ping_server, daemon=True)
     monitor.start()
     return monitor
+
+# ==================== FUNZIONI AUSILIARIE ====================
+
+def escape_markdown(text: str) -> str:
+    """Escape caratteri speciali per MarkdownV2"""
+    if not text:
+        return ""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
 # ==================== FUNZIONI START ====================
 
@@ -520,9 +593,9 @@ async def show_list_details(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id = update.effective_user.id
 
     conn = get_db_connection()
-    cur = conn.cursor()
+        cur = conn.cursor()
 
-    cur.execute("""
+        cur.execute("""
         SELECT notification_days
         FROM list_subscriptions
         WHERE user_id = (SELECT id FROM users WHERE telegram_id = %s)
@@ -864,7 +937,6 @@ async def handle_admin_duration_input(update: Update, context: ContextTypes.DEFA
         # Calcola data scadenza
         expires_at = None
         if duration_days and duration_days > 0:
-            from datetime import datetime
             expires_at = datetime.now() + timedelta(days=duration_days)
 
         # Applica blacklist
@@ -919,7 +991,7 @@ class AdvancedRateLimiter:
         if hour_requests >= self.MAX_REQUESTS_PER_HOUR:
             return True, "Troppe richieste all'ora", "rate_limit_hour"
 
-        # Controllo 3: Comandi identici consecutivi
+        # Controllo 3: Comandi identici consecutivos
         recent_commands = [cmd for cmd_time, cmd in self.user_commands[user_id] if now - cmd_time < 300]  # 5 minuti
         if len(recent_commands) >= 3:
             identical_count = 1
@@ -1058,6 +1130,9 @@ def enhanced_spam_check(func):
             return
 
         # Esegui funzione normale
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
 # ==================== SISTEMA AUTO-COMPLETE ====================
 class AutoCompleteManager:
     """Gestisce auto-complete per comandi e nomi liste"""
@@ -1141,7 +1216,7 @@ async def handle_inline_search(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
             )
 
-        # Se non ci sono risultati, mostra un messaggio di help
+        # Se non ci sono risultati, mostra un messaggio de help
         if not results:
             results.append(
                 InlineQueryResultArticle(
@@ -1413,13 +1488,23 @@ def main():
     try:
         safe_log('info', "🚀 Avvio bot Telegram...")
 
+        if not TOKEN:
+            safe_log('error', "❌ Token del bot non configurato")
+            return
+
+        safe_log('info', "✅ Configurazione base verificata")
+
         if not check_database_connection():
             safe_log('error', "❌ Impossibile connettersi al database all'avvio")
             return
 
+        safe_log('info', "✅ Connessione database verificata")
+
         if not init_database():
             safe_log('error', "❌ Errore nell'inizializzazione del database")
             return
+
+        safe_log('info', "✅ Database inizializzato")
 
         # Verifica estensioni database necessarie
         if not check_database_extensions():
@@ -1475,6 +1560,7 @@ def main():
         safe_log('info', "💡 Auto-complete e inline mode attivi")
 
         if RENDER:
+            safe_log('info', "🌐 Modalità webhook per Render")
             application.run_webhook(
                 listen="0.0.0.0",
                 port=int(os.getenv('PORT', 10000)),
@@ -1484,11 +1570,12 @@ def main():
                 allowed_updates=Update.ALL_TYPES
             )
         else:
+            safe_log('info', "🔍 Modalità polling attiva")
             application.run_polling()
 
     except Exception as e:
         # Fallback logging - NON usare logger qui perché potrebbe non essere disponibile
-        error_msg = f"ERRORE CRITICO nell'avvio del bot: {e}"
+        error_msg = f"ERRORE CRITICO nell'avvio del bot: {e}\n{traceback.format_exc()}"
         print(error_msg)
         print("ATTENZIONE: Impossibile scrivere nel log di errore - usa solo console output")
 
