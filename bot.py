@@ -42,16 +42,19 @@ async def notify_admins(bot, message: str):
     """Invia notifica a tutti gli admin"""
     for admin_id in ADMIN_IDS:
         try:
-            await bot.send_message(chat_id=admin_id, text=message, parse_mode='Markdown')
+            await bot.send_message(chat_id=admin_id, text=message)
         except Exception as e:
             logger.error(f"Failed to notify admin {admin_id}: {e}")
 
-def escape_markdown(text):
-    """Escape dei caratteri speciali Markdown"""
+def escape_html(text):
+    """Escape dei caratteri speciali HTML"""
     if not text:
         return ""
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return ''.join(f'\\{char}' if char in escape_chars else char for char in str(text))
+    return (str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+    )
 
 # ==================== HANDLER COMANDI ====================
 
@@ -64,28 +67,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         create_or_update_user(user.id, user.username, user.full_name)
         
         welcome_text = f"""
-👋 Ciao {user.full_name}!
+👋 Ciao <b>{escape_html(user.full_name)}</b>!
 
-🎉 *Benvenuto nel bot di supporto!*
+🎉 <b>Benvenuto nel bot di supporto!</b>
 
-🔧 *Cosa posso fare per te:*
+🔧 <b>Cosa posso fare per te:</b>
 • 🎫 Apri un ticket di supporto
 • 📋 Cerca e gestisci le tue liste
 • 🔔 Imposta promemoria personalizzati
 
-💡 *Comandi principali:*
+💡 <b>Comandi principali:</b>
 • /help - Guida completa
 • /ticket - Apri un nuovo ticket
 • /cerca - Cerca una lista
 • /miei_ticket - I tuoi ticket
 
-{"😊 Sei un amministratore del sistema!" if user.id in ADMIN_IDS else ""}
+{"😊 <b>Sei un amministratore del sistema!</b>" if user.id in ADMIN_IDS else ""}
         """
         
         keyboard = [[InlineKeyboardButton("📖 Guida Completa", callback_data='help')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=reply_markup)
+        await update.message.reply_text(welcome_text, parse_mode='HTML', reply_markup=reply_markup)
         
     except Exception as e:
         logger.error(f"Errore in start: {e}")
@@ -99,21 +102,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer()
 
         help_text = """
-📚 *GUIDA COMPLETA*
+📚 <b>GUIDA COMPLETA</b>
 
-🔧 *Comandi Disponibili:*
+🔧 <b>Comandi Disponibili:</b>
 
-🎫 *Supporto*
-• /ticket <descrizione> - Apri un nuovo ticket
+🎫 <b>Supporto</b>
+• /ticket &lt;descrizione&gt; - Apri un nuovo ticket
 • /miei_ticket - Visualizza i tuoi ticket aperti
 
-📋 *Liste e Ricerche*
-• /cerca <nome> - Cerca una lista specifica
+📋 <b>Liste e Ricerche</b>
+• /cerca &lt;nome&gt; - Cerca una lista specifica
 
-🔔 *Promemoria*
+🔔 <b>Promemoria</b>
 • /promemoria - Gestisci le tue preferenze notifiche
 
-🔧 *Admin (solo amministratori)*
+🔧 <b>Admin (solo amministratori)</b>
 • /admin - Pannello gestione completo
         """
         
@@ -127,9 +130,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         if query:
-            await query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=reply_markup)
+            await query.edit_message_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
         else:
-            await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=reply_markup)
+            await update.message.reply_text(help_text, parse_mode='HTML', reply_markup=reply_markup)
 
     except Exception as e:
         logger.error(f"Errore in help_command: {e}")
@@ -160,9 +163,11 @@ async def new_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ticket_id = create_ticket(db_user['id'], description)
         
         if ticket_id:
-            await update.message.reply_text(f"✅ Ticket #{ticket_id} creato!\n\n📝 Descrizione: {description}")
+            response_text = f"✅ Ticket #{ticket_id} creato!\n\n📝 Descrizione: {escape_html(description)}"
+            await update.message.reply_text(response_text)
             # Notifica admin
-            await notify_admins(context.bot, f"🎫 Nuovo ticket #{ticket_id} da {user.full_name}\n\n{description}")
+            admin_notification = f"🎫 Nuovo ticket #{ticket_id} da {escape_html(user.full_name)}\n\n{escape_html(description)}"
+            await notify_admins(context.bot, admin_notification)
         else:
             await update.message.reply_text("❌ Errore nella creazione del ticket.")
 
@@ -187,13 +192,13 @@ async def my_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📋 Non hai ticket aperti.\n\n💡 Usa /ticket <descrizione> per aprirne uno nuovo.")
             return
 
-        text = "📋 *I Tuoi Ticket:*\n\n"
+        text = "📋 <b>I Tuoi Ticket:</b>\n\n"
         for ticket in tickets:
             status_emoji = {"open": "🔴", "in_progress": "🟡", "closed": "🟢"}.get(ticket['status'], "⚪")
-            text += f"{status_emoji} *#{ticket['id']}* - {ticket['subject']}\n"
+            text += f"{status_emoji} <b>#{ticket['id']}</b> - {escape_html(ticket['subject'])}\n"
             text += f"   📅 {ticket['created_at'].strftime('%d/%m/%Y %H:%M')}\n\n"
 
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text, parse_mode='HTML')
 
     except Exception as e:
         logger.error(f"Errore in my_tickets: {e}")
@@ -211,32 +216,32 @@ async def search_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results = search_lists(list_name)
 
         if not results:
-            await update.message.reply_text(f"❌ Nessuna lista trovata con '{list_name}'.")
+            await update.message.reply_text(f"❌ Nessuna lista trovata con '{escape_html(list_name)}'.")
             return
 
         if len(results) == 1:
             # Mostra dettaglio singola lista
             list_data = results[0]
             expiration_text = list_data['expiration_date'].strftime('%d/%m/%Y') if list_data['expiration_date'] else 'Non specificata'
-            notes_text = escape_markdown(list_data['notes']) if list_data['notes'] else 'Nessuna nota'
+            notes_text = escape_html(list_data['notes']) if list_data['notes'] else 'Nessuna nota'
             
             text = f"""
-📋 *Lista Trovata:*
+📋 <b>Lista Trovata:</b>
 
-🏷️ *Nome:* {escape_markdown(list_data['name'])}
-💰 *Costo:* €{list_data['cost']}
-📅 *Scadenza:* {expiration_text}
-📝 *Note:* {notes_text}
+🏷️ <b>Nome:</b> {escape_html(list_data['name'])}
+💰 <b>Costo:</b> €{list_data['cost']}
+📅 <b>Scadenza:</b> {expiration_text}
+📝 <b>Note:</b> {notes_text}
             """
-            await update.message.reply_text(text, parse_mode='MarkdownV2')
+            await update.message.reply_text(text, parse_mode='HTML')
         else:
             # Mostra lista risultati
-            text = f"📋 *Risultati Ricerca ({len(results)} trovati):*\n\n"
+            text = f"📋 <b>Risultati Ricerca ({len(results)} trovati):</b>\n\n"
             for list_data in results:
                 exp_date = list_data['expiration_date'].strftime('%d/%m/%Y') if list_data['expiration_date'] else 'N/A'
-                text += f"• *{escape_markdown(list_data['name'])}* - €{list_data['cost']} (scad: {exp_date})\n"
+                text += f"• <b>{escape_html(list_data['name'])}</b> - €{list_data['cost']} (scad: {exp_date})\n"
             
-            await update.message.reply_text(text, parse_mode='MarkdownV2')
+            await update.message.reply_text(text, parse_mode='HTML')
 
     except Exception as e:
         logger.error(f"Errore in search_list: {e}")
@@ -254,7 +259,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         text = """
-👑 *Pannello Admin - Funzionalità Avanzate*
+👑 <b>Pannello Admin - Funzionalità Avanzate</b>
 
 Seleziona l'area di gestione:
         """
@@ -267,7 +272,7 @@ Seleziona l'area di gestione:
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        await update.message.reply_text(text, parse_mode='HTML', reply_markup=reply_markup)
 
     except Exception as e:
         logger.error(f"Errore in admin_panel: {e}")
@@ -299,19 +304,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     list_data = results[0]
                     expiration_text = list_data['expiration_date'].strftime('%d/%m/%Y') if list_data['expiration_date'] else 'Non specificata'
                     text = f"""
-📋 *Lista Trovata:*
+📋 <b>Lista Trovata:</b>
 
-🏷️ *Nome:* {escape_markdown(list_data['name'])}
-💰 *Costo:* €{list_data['cost']}
-📅 *Scadenza:* {expiration_text}
+🏷️ <b>Nome:</b> {escape_html(list_data['name'])}
+💰 <b>Costo:</b> €{list_data['cost']}
+📅 <b>Scadenza:</b> {expiration_text}
                     """
-                    await update.message.reply_text(text, parse_mode='MarkdownV2')
+                    await update.message.reply_text(text, parse_mode='HTML')
                 else:
-                    text = f"📋 *Trovate {len(results)} liste:*\n\n"
+                    text = f"📋 <b>Trovate {len(results)} liste:</b>\n\n"
                     for list_data in results[:5]:  # Mostra max 5 risultati
                         exp_date = list_data['expiration_date'].strftime('%d/%m/%Y') if list_data['expiration_date'] else 'N/A'
-                        text += f"• *{escape_markdown(list_data['name'])}* - €{list_data['cost']}\n"
-                    await update.message.reply_text(text, parse_mode='MarkdownV2')
+                        text += f"• <b>{escape_html(list_data['name'])}</b> - €{list_data['cost']}\n"
+                    await update.message.reply_text(text, parse_mode='HTML')
             else:
                 await update.message.reply_text("❌ Nessuna lista trovata. Prova con un altro nome.")
 
