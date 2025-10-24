@@ -3,16 +3,23 @@ import logging
 import psycopg2
 import json
 from datetime import datetime
-from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
+
+# Configurazione logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 def get_db_connection():
     """Restituisce una connessione al database"""
-    return psycopg2.connect(os.getenv('DATABASE_URL'))
+    return psycopg2.connect(os.getenv('DATABASE_URL'), cursor_factory=RealDictCursor)
 
 def init_database():
     """Inizializza il database e crea le tabelle se non esistono"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
         
         # Tabella utenti
@@ -23,7 +30,8 @@ def init_database():
                 username VARCHAR(255),
                 full_name VARCHAR(255),
                 is_admin BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
             );
         """)
         
@@ -40,7 +48,7 @@ def init_database():
             );
         """)
         
-        # Tabella ticket - AGGIORNATA con urgency e sentiment
+        # Tabella ticket
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
                 id SERIAL PRIMARY KEY,
@@ -232,7 +240,7 @@ def init_database():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_operation_history_user ON operation_history(user_id);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_command_suggestions_usage ON command_suggestions(usage_count DESC, last_used DESC);")
         
-        # AGGIUNGI: Migrazione per aggiungere le colonne mancanti se esistono tabelle vecchie
+        # Migrazione per aggiungere le colonne mancanti se esistono tabelle vecchie
         try:
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sentiment VARCHAR(10);")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS urgency VARCHAR(10) DEFAULT 'medium';")
@@ -258,7 +266,7 @@ def init_database():
 def check_database_connection():
     """Verifica la connessione al database"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT 1;")
         cur.close()
@@ -271,7 +279,7 @@ def check_database_connection():
 def get_database_stats():
     """Restituisce statistiche del database"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
         
         stats = {}
@@ -300,7 +308,7 @@ def get_database_stats():
 def check_user_restriction(telegram_id: int, restriction_type: str) -> bool:
     """Verifica se un utente ha una restrizione attiva"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -328,7 +336,7 @@ def add_user_restriction(telegram_id: int, restriction_type: str, reason: str = 
                         restricted_by: int = None, expires_at: datetime = None):
     """Aggiunge una restrizione utente"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -356,7 +364,7 @@ def add_user_restriction(telegram_id: int, restriction_type: str, reason: str = 
 def remove_user_restriction(telegram_id: int, restriction_type: str):
     """Rimuove una restrizione utente"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -379,7 +387,7 @@ def remove_user_restriction(telegram_id: int, restriction_type: str):
 def check_rate_limit(user_id: int, command: str, max_requests: int = 5, window_seconds: int = 60):
     """Verifica rate limit per utente"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         # Conta richieste nell'ultima finestra temporale
@@ -414,7 +422,7 @@ def log_operation(user_id: int, operation_type: str, table_name: str, record_id:
                  old_data: dict = None, new_data: dict = None):
     """Log operazione per sistema undo/redo"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -437,7 +445,7 @@ def log_operation(user_id: int, operation_type: str, table_name: str, record_id:
 def check_database_extensions():
     """Verifica che le estensioni PostgreSQL necessarie siano installate"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         # Verifica estensioni necessarie per ricerca intelligente
@@ -461,7 +469,7 @@ def check_database_extensions():
 def undo_last_operation(user_id: int):
     """Annulla l'ultima operazione dell'utente"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         # Trova l'ultima operazione
@@ -514,7 +522,7 @@ def undo_last_operation(user_id: int):
 def get_command_suggestions(partial: str, limit: int = 5):
     """Ottieni suggerimenti comandi per auto-complete"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -539,7 +547,7 @@ def get_command_suggestions(partial: str, limit: int = 5):
 def update_command_usage(command: str):
     """Aggiorna contatore uso comando"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -563,7 +571,7 @@ def update_command_usage(command: str):
 def get_list_suggestions(partial: str, limit: int = 5):
     """Ottieni suggerimenti nomi liste per auto-complete"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -588,7 +596,7 @@ def get_list_suggestions(partial: str, limit: int = 5):
 def get_user_restrictions(limit: int = 50):
     """Ottieni lista restrizioni utenti per admin dashboard"""
     try:
-        conn = psycopg2.connect(os.getenv('DATABASE_URL'))
+        conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
@@ -618,3 +626,99 @@ def get_user_restrictions(limit: int = 50):
             cur.close()
         if 'conn' in locals():
             conn.close()
+
+# Nuove funzioni aggiunte per il bot semplificato
+
+def create_or_update_user(telegram_id, username, full_name):
+    """Crea o aggiorna utente nel database"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (telegram_id, username, full_name, created_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (telegram_id) DO UPDATE SET
+                username = EXCLUDED.username,
+                full_name = EXCLUDED.full_name,
+                updated_at = NOW()
+        """, (telegram_id, username, full_name))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Errore create_or_update_user: {e}")
+        return False
+
+def get_user_by_telegram_id(telegram_id):
+    """Ottiene utente dal database"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+        return user
+    except Exception as e:
+        logger.error(f"Errore get_user_by_telegram_id: {e}")
+        return None
+
+def create_ticket(user_id, description):
+    """Crea un nuovo ticket"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO tickets (user_id, subject, status, created_at)
+            VALUES (%s, %s, 'open', NOW())
+            RETURNING id
+        """, (user_id, description))
+        ticket_id = cur.fetchone()['id']
+        conn.commit()
+        cur.close()
+        conn.close()
+        return ticket_id
+    except Exception as e:
+        logger.error(f"Errore create_ticket: {e}")
+        return None
+
+def get_user_tickets(user_id):
+    """Ottiene i ticket di un utente"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, subject, status, created_at 
+            FROM tickets 
+            WHERE user_id = %s 
+            ORDER BY created_at DESC 
+            LIMIT 10
+        """, (user_id,))
+        tickets = cur.fetchall()
+        cur.close()
+        conn.close()
+        return tickets
+    except Exception as e:
+        logger.error(f"Errore get_user_tickets: {e}")
+        return []
+
+def search_lists(query):
+    """Cerca liste nel database"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, cost, expiration_date, notes, created_at
+            FROM lists 
+            WHERE name ILIKE %s
+            ORDER BY name
+            LIMIT 10
+        """, (f'%{query}%',))
+        results = cur.fetchall()
+        cur.close()
+        conn.close()
+        return results
+    except Exception as e:
+        logger.error(f"Errore search_lists: {e}")
+        return []
