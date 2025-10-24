@@ -30,8 +30,7 @@ def init_database():
                 username VARCHAR(255),
                 full_name VARCHAR(255),
                 is_admin BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
+                created_at TIMESTAMP DEFAULT NOW()
             );
         """)
         
@@ -246,8 +245,9 @@ def init_database():
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS urgency VARCHAR(10) DEFAULT 'medium';")
             cur.execute("ALTER TABLE renewal_requests ADD COLUMN IF NOT EXISTS old_expiration DATE;")
             cur.execute("ALTER TABLE renewal_requests ADD COLUMN IF NOT EXISTS new_expiration DATE;")
-            conn.commit()
-            logger.info("Migrazione database completata - colonne urgency, sentiment, old_expiration e new_expiration aggiunte")
+            # Aggiungi colonna updated_at se non esiste
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();")
+            logger.info("Migrazione database completata - colonne aggiunte con successo")
         except Exception as migration_error:
             logger.warning(f"Migrazione non necessaria o già eseguita: {migration_error}")
             conn.rollback()  # Rollback per continuare con il commit principale
@@ -627,7 +627,7 @@ def get_user_restrictions(limit: int = 50):
         if 'conn' in locals():
             conn.close()
 
-# Nuove funzioni aggiunte per il bot semplificato
+# ==================== NUOVE FUNZIONI PER BOT SEMPLIFICATO ====================
 
 def create_or_update_user(telegram_id, username, full_name):
     """Crea o aggiorna utente nel database"""
@@ -639,8 +639,7 @@ def create_or_update_user(telegram_id, username, full_name):
             VALUES (%s, %s, %s, NOW())
             ON CONFLICT (telegram_id) DO UPDATE SET
                 username = EXCLUDED.username,
-                full_name = EXCLUDED.full_name,
-                updated_at = NOW()
+                full_name = EXCLUDED.full_name
         """, (telegram_id, username, full_name))
         conn.commit()
         cur.close()
