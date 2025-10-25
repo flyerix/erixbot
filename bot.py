@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import asyncio
 from threading import Thread
 import time
+import traceback
 
 # Configurazione logging (deve essere prima di tutto)
 logging.basicConfig(
@@ -54,14 +55,57 @@ def webhook_handler():
         return jsonify({"error": "Bot not initialized"}), 500
 
     try:
+        # Log per debugging
+        logger.info(f"Ricevuta richiesta webhook: {request.method} {request.url}")
+        logger.info(f"Headers: {dict(request.headers)}")
+
         # Process webhook data
-        data = request.get_json()
+        data = request.get_json(force=True)
         if data:
+            logger.info(f"Dati webhook: {json.dumps(data, indent=2)}")
+
+            # Crea update object
             update = Update.de_json(data, application.bot)
-            application.process_update(update)
+            if update:
+                # Processa l'update direttamente (senza async per semplicità)
+                try:
+                    # Usa il process_update del bot direttamente
+                    application.bot.process_update(update)
+                    logger.info("Update processato con successo")
+                except Exception as e:
+                    logger.error(f"Errore processamento update: {e}")
+                    return jsonify({"error": f"Update processing failed: {str(e)}"}), 500
+            else:
+                logger.warning("Update è None")
+                return jsonify({"error": "Invalid update data"}), 400
+        else:
+            logger.warning("Nessun dato JSON ricevuto")
+            return jsonify({"error": "No JSON data received"}), 400
+
         return jsonify({"status": "ok"}), 200
+
     except Exception as e:
         logger.error(f"Errore webhook: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+# Aggiungi anche un endpoint per il token per compatibilità
+@app.route('/<bot_token>', methods=['POST'])
+def webhook_token_handler(bot_token):
+    """Webhook handler per URL con token (compatibilità)"""
+    try:
+        logger.info(f"Ricevuta richiesta con token: {bot_token}")
+        logger.info(f"Request data: {request.get_data(as_text=True)}")
+
+        # Verifica se il token è corretto
+        if bot_token != TELEGRAM_TOKEN:
+            logger.error(f"Token non valido: {bot_token}")
+            return jsonify({"error": "Invalid token"}), 401
+
+        # Processa come webhook normale
+        return webhook_handler()
+    except Exception as e:
+        logger.error(f"Errore webhook token: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/')
@@ -1008,6 +1052,83 @@ def start_flask():
     """Avvia il server Flask in un thread separato"""
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)), debug=False)
 
+def setup_webhook_after_start():
+    """Configura webhook dopo l'avvio del server"""
+    try:
+        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
+        logger.info(f"🔄 Configurazione webhook post-start: {webhook_url}")
+
+        # Prima rimuovi webhook esistente se necessario
+        try:
+            current_webhook = application.bot.get_webhook_info()
+            logger.info(f"📋 Webhook attuale: {current_webhook}")
+
+            if current_webhook.url and current_webhook.url != webhook_url:
+                logger.info(f"🗑️ Rimozione webhook esistente: {current_webhook.url}")
+                application.bot.delete_webhook()
+        except Exception as e:
+            logger.warning(f"⚠️ Errore rimozione webhook esistente: {e}")
+
+        # Configura nuovo webhook
+        webhook_info = application.bot.set_webhook(
+            url=webhook_url,
+            max_connections=100,
+            drop_pending_updates=True
+        )
+
+        # Verifica webhook
+        webhook_status = application.bot.get_webhook_info()
+        logger.info(f"✅ Webhook configurato: {webhook_info}")
+        logger.info(f"✅ Webhook status: {webhook_status}")
+
+    except Exception as e:
+        logger.error(f"❌ Errore configurazione webhook: {e}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+
+@app.route('/webhook/setup', methods=['POST'])
+def manual_webhook_setup():
+    """Endpoint per configurare manualmente il webhook"""
+    try:
+        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
+        logger.info(f"🔧 Configurazione webhook manuale: {webhook_url}")
+
+        # Rimuovi webhook esistente
+        application.bot.delete_webhook()
+
+        # Configura nuovo webhook
+        webhook_info = application.bot.set_webhook(
+            url=webhook_url,
+            max_connections=100,
+            drop_pending_updates=True
+        )
+
+        # Verifica
+        webhook_status = application.bot.get_webhook_info()
+
+        return jsonify({
+            "status": "success",
+            "webhook_url": webhook_url,
+            "webhook_info": str(webhook_info),
+            "webhook_status": str(webhook_status)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"❌ Errore setup webhook manuale: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/webhook/status', methods=['GET'])
+def webhook_status():
+    """Endpoint per verificare lo status del webhook"""
+    try:
+        webhook_info = application.bot.get_webhook_info()
+        return jsonify({
+            "webhook_info": str(webhook_info),
+            "render_external_url": os.getenv('RENDER_EXTERNAL_URL'),
+            "bot_token_configured": bool(TELEGRAM_TOKEN)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 def main():
     """Punto di ingresso principale dell'applicazione"""
     logger.info("🚀 Avvio Erix Bot...")
@@ -1022,28 +1143,21 @@ def main():
 
     # Inizializza bot
     logger.info("🤖 Inizializzazione bot Telegram...")
+    global application
     application = init_bot()
     logger.info("✅ Bot Telegram inizializzato")
 
-    # Usa sempre webhook mode per compatibilità con Render
-    logger.info("🔗 Configurazione webhook...")
-    port = int(os.getenv('PORT', 8080))
-    webhook_url = os.getenv('WEBHOOK_URL', f"https://{os.getenv('RENDER_EXTERNAL_URL', 'localhost')}/webhook")
-
-    if os.getenv('RENDER_EXTERNAL_URL'):
-        # Su Render, usa l'URL fornito
-        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
-
-    try:
-        # Imposta webhook
-        application.bot.set_webhook(url=webhook_url)
-        logger.info(f"✅ Webhook impostato: {webhook_url}")
-    except Exception as e:
-        logger.error(f"❌ Errore impostazione webhook: {e}")
-        return
-
     # Avvia Flask server
-    logger.info(f"🌐 Avvio server Flask su porta {port}...")
+    logger.info("🌐 Avvio server Flask...")
+    port = int(os.getenv('PORT', 8080))
+
+    # Configura webhook dopo un breve delay per permettere al server di avviarsi
+    if os.getenv('RENDER_EXTERNAL_URL'):
+        import threading
+        threading.Timer(2.0, setup_webhook_after_start).start()
+        logger.info("⏰ Webhook sarà configurato tra 2 secondi...")
+
+    logger.info(f"🌐 Server Flask in avvio su porta {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == "__main__":
