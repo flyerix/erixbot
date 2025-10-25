@@ -69,8 +69,8 @@ def webhook_handler():
             if update:
                 # Processa l'update direttamente (senza async per semplicità)
                 try:
-                    # Usa il process_update del bot direttamente
-                    application.bot.process_update(update)
+                    # Usa application.process_update invece di application.bot.process_update
+                    application.process_update(update)
                     logger.info("Update processato con successo")
                 except Exception as e:
                     logger.error(f"Errore processamento update: {e}")
@@ -1065,21 +1065,37 @@ def setup_webhook_after_start():
 
             if current_webhook.url and current_webhook.url != webhook_url:
                 logger.info(f"🗑️ Rimozione webhook esistente: {current_webhook.url}")
-                application.bot.delete_webhook()
+                delete_result = application.bot.delete_webhook()
+                logger.info(f"🗑️ Risultato rimozione: {delete_result}")
+
+                # Attesa per permettere a Telegram di processare la rimozione
+                import time
+                time.sleep(1)
         except Exception as e:
             logger.warning(f"⚠️ Errore rimozione webhook esistente: {e}")
 
-        # Configura nuovo webhook
+        # Configura nuovo webhook con parametri ottimali
+        logger.info(f"🔧 Configurazione webhook: {webhook_url}")
         webhook_info = application.bot.set_webhook(
             url=webhook_url,
             max_connections=100,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]  # Specifica solo i tipi di update necessari
         )
 
-        # Verifica webhook
-        webhook_status = application.bot.get_webhook_info()
         logger.info(f"✅ Webhook configurato: {webhook_info}")
-        logger.info(f"✅ Webhook status: {webhook_status}")
+
+        # Verifica webhook dopo un breve delay
+        import time
+        time.sleep(1)
+        webhook_status = application.bot.get_webhook_info()
+        logger.info(f"✅ Webhook status finale: {webhook_status}")
+
+        # Verifica che l'URL sia corretto
+        if webhook_status.url == webhook_url:
+            logger.info(f"🎉 Webhook configurato correttamente: {webhook_url}")
+        else:
+            logger.error(f"❌ Webhook URL non corrisponde! Atteso: {webhook_url}, Attuale: {webhook_status.url}")
 
     except Exception as e:
         logger.error(f"❌ Errore configurazione webhook: {e}")
@@ -1092,28 +1108,71 @@ def manual_webhook_setup():
         webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
         logger.info(f"🔧 Configurazione webhook manuale: {webhook_url}")
 
+        # Prima verifica status attuale
+        try:
+            current_webhook = application.bot.get_webhook_info()
+            logger.info(f"📋 Webhook attuale prima del setup: {current_webhook}")
+        except Exception as e:
+            logger.warning(f"⚠️ Errore verifica webhook esistente: {e}")
+
         # Rimuovi webhook esistente
-        application.bot.delete_webhook()
+        logger.info("🗑️ Rimozione webhook esistente...")
+        delete_result = application.bot.delete_webhook()
+        logger.info(f"🗑️ Risultato rimozione: {delete_result}")
+
+        # Attesa per permettere a Telegram di processare
+        import time
+        time.sleep(1)
 
         # Configura nuovo webhook
+        logger.info(f"🔧 Configurazione webhook: {webhook_url}")
         webhook_info = application.bot.set_webhook(
             url=webhook_url,
             max_connections=100,
-            drop_pending_updates=True
+            drop_pending_updates=True,
+            allowed_updates=["message", "callback_query"]
         )
 
-        # Verifica
+        # Verifica dopo setup
+        time.sleep(1)
         webhook_status = application.bot.get_webhook_info()
+
+        logger.info(f"✅ Setup completato: {webhook_info}")
+        logger.info(f"✅ Status finale: {webhook_status}")
 
         return jsonify({
             "status": "success",
             "webhook_url": webhook_url,
             "webhook_info": str(webhook_info),
-            "webhook_status": str(webhook_status)
+            "webhook_status": str(webhook_status),
+            "render_external_url": os.getenv('RENDER_EXTERNAL_URL'),
+            "bot_token_configured": bool(TELEGRAM_TOKEN)
         }), 200
 
     except Exception as e:
         logger.error(f"❌ Errore setup webhook manuale: {e}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/webhook/delete', methods=['POST'])
+def delete_webhook():
+    """Endpoint per rimuovere il webhook"""
+    try:
+        logger.info("🗑️ Rimozione webhook...")
+        result = application.bot.delete_webhook()
+        time.sleep(1)
+        status = application.bot.get_webhook_info()
+        logger.info(f"✅ Webhook rimosso: {result}")
+        logger.info(f"✅ Status dopo rimozione: {status}")
+
+        return jsonify({
+            "status": "success",
+            "delete_result": str(result),
+            "webhook_status": str(status)
+        }), 200
+
+    except Exception as e:
+        logger.error(f"❌ Errore rimozione webhook: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/webhook/status', methods=['GET'])
@@ -1132,6 +1191,20 @@ def webhook_status():
 def main():
     """Punto di ingresso principale dell'applicazione"""
     logger.info("🚀 Avvio Erix Bot...")
+
+    # Log environment variables per debug
+    logger.info(f"🌍 Environment variables:")
+    logger.info(f"   RENDER_EXTERNAL_URL: {os.getenv('RENDER_EXTERNAL_URL')}")
+    logger.info(f"   TELEGRAM_BOT_TOKEN: {'*' * len(os.getenv('TELEGRAM_BOT_TOKEN', ''))}")
+    logger.info(f"   RENDER: {os.getenv('RENDER')}")
+    logger.info(f"   DATABASE_URL: {'*' * 20}...")
+
+    # Verifica RENDER_EXTERNAL_URL
+    render_external_url = os.getenv('RENDER_EXTERNAL_URL')
+    if not render_external_url:
+        logger.error("❌ RENDER_EXTERNAL_URL non configurato!")
+        logger.error("   Verifica che 'RENDER_EXTERNAL_URL' sia impostato su 'Auto' in Render Dashboard")
+        return
 
     # Inizializza database solo se disponibile
     if DATABASE_AVAILABLE:
@@ -1152,7 +1225,7 @@ def main():
     port = int(os.getenv('PORT', 8080))
 
     # Configura webhook dopo un breve delay per permettere al server di avviarsi
-    if os.getenv('RENDER_EXTERNAL_URL'):
+    if render_external_url:
         import threading
         threading.Timer(2.0, setup_webhook_after_start).start()
         logger.info("⏰ Webhook sarà configurato tra 2 secondi...")
