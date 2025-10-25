@@ -1,23 +1,184 @@
 import os
 import logging
-import psycopg2
 import json
 from datetime import datetime, timedelta
-from psycopg2.extras import RealDictCursor
+import asyncio
+from threading import Thread
+import time
 
-# Configurazione logging
+# Configurazione logging (deve essere prima di tutto)
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Telegram Bot imports
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+
+# Flask imports for webhook
+from flask import Flask, request, jsonify
+
+# Database imports (optional for testing)
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    DATABASE_AVAILABLE = True
+except ImportError:
+    logger.warning("psycopg2 non disponibile - database disabilitato per test locale")
+    DATABASE_AVAILABLE = False
+
+# Flask app for webhook
+app = Flask(__name__)
+
+# Telegram bot configuration
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+if not TELEGRAM_TOKEN:
+    logger.error("TELEGRAM_BOT_TOKEN non configurato!")
+    exit(1)
+
+# Global application instance
+application = None
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint per Render"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()}), 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook_handler():
+    """Webhook handler per Telegram"""
+    if not application:
+        logger.error("Bot non inizializzato")
+        return jsonify({"error": "Bot not initialized"}), 500
+
+    try:
+        # Process webhook data
+        data = request.get_json()
+        if data:
+            update = Update.de_json(data, application.bot)
+            application.process_update(update)
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        logger.error(f"Errore webhook: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/')
+def root():
+    """Root endpoint"""
+    return jsonify({"message": "Erix Bot is running!", "version": "1.0"}), 200
+
+def init_bot():
+    """Inizializza il bot Telegram"""
+    global application
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Registra i gestori di comandi
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    return application
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce il comando /start"""
+    user = update.effective_user
+    telegram_id = user.id
+
+    # Registra utente nel database solo se disponibile
+    if DATABASE_AVAILABLE:
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+
+            # Controlla se utente esiste già
+            cur.execute("SELECT id FROM users WHERE telegram_id = %s", (telegram_id,))
+            existing_user = cur.fetchone()
+
+            if not existing_user:
+                cur.execute("""
+                    INSERT INTO users (telegram_id, username, full_name)
+                    VALUES (%s, %s, %s)
+                """, (telegram_id, user.username, user.full_name))
+                conn.commit()
+                logger.info(f"Nuovo utente registrato: {telegram_id}")
+            else:
+                logger.info(f"Utente esistente: {telegram_id}")
+
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Errore registrazione utente: {e}")
+    else:
+        logger.info(f"Bot avviato da utente {telegram_id} (database non disponibile)")
+
+    welcome_text = (
+        "🤖 *Benvenuto in Erix Bot!*\n\n"
+        "Sono il tuo assistente personale per:\n"
+        "• 🎫 Gestione ticket di supporto\n"
+        "• 📝 Promemoria intelligenti\n"
+        "• 📋 Liste personali con scadenze\n"
+        "• 🔥 Offerte Fire TV Stick\n\n"
+        "Usa /help per vedere tutti i comandi disponibili!"
+    )
+
+    await update.message.reply_markdown(welcome_text)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce il comando /help"""
+    help_text = (
+        "📖 *Guida Comandi Erix Bot*\n\n"
+        "*Comandi utente:*\n"
+        "/start - Avvia il bot\n"
+        "/help - Mostra questa guida\n"
+        "/ticket <testo> - Apri un ticket\n"
+        "/cerca <nome> - Cerca una lista\n"
+        "/promemoria - Imposta preferenze notifiche\n"
+        "/miei_ticket - Elenca i tuoi ticket\n"
+        "/firestick - Menu offerte Fire TV Stick\n\n"
+        "*Solo admin:*\n"
+        "/admin - Pannello gestione admin\n\n"
+        "💡 *Suggerimento:* Per le offerte Fire TV Stick, usa il pulsante qui sotto!"
+    )
+
+    keyboard = [[InlineKeyboardButton("🔥 Offerte Fire TV Stick", callback_data="firestick_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_markdown(help_text, reply_markup=reply_markup)
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce i callback dei pulsanti inline"""
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "firestick_menu":
+        await query.edit_message_text(
+            "🔥 *Menu Offerte Fire TV Stick*\n\n"
+            "Scegli un'opzione:\n"
+            "• Attiva notifiche per offerte\n"
+            "• Disattiva notifiche\n"
+            "• Visualizza offerte attuali\n\n"
+            "Usa il comando /firestick per gestire le tue preferenze!",
+            parse_mode="Markdown"
+        )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce i messaggi di testo"""
+    await update.message.reply_text("📝 Usa i comandi per interagire con me! Usa /help per vedere tutti i comandi disponibili.")
+
 def get_db_connection():
     """Restituisce una connessione al database"""
+    if not DATABASE_AVAILABLE:
+        raise Exception("Database non disponibile - psycopg2 non installato")
     return psycopg2.connect(os.getenv('DATABASE_URL'), cursor_factory=RealDictCursor)
 
 def init_database():
     """Inizializza il database e crea le tabelle se non esistono"""
+    if not DATABASE_AVAILABLE:
+        logger.warning("Database non disponibile - skip inizializzazione")
+        return
     try:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -843,21 +1004,47 @@ def get_all_lists(limit=10):
         logger.error(f"Errore get_all_lists: {e}")
         return []
 
-def get_ticket_by_id(ticket_id):
-    """Ottiene un ticket specifico per ID"""
+def start_flask():
+    """Avvia il server Flask in un thread separato"""
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)), debug=False)
+
+def main():
+    """Punto di ingresso principale dell'applicazione"""
+    logger.info("🚀 Avvio Erix Bot...")
+
+    # Inizializza database solo se disponibile
+    if DATABASE_AVAILABLE:
+        logger.info("📊 Inizializzazione database...")
+        init_database()
+        logger.info("✅ Database inizializzato")
+    else:
+        logger.warning("📊 Database non disponibile - bot funzionerà in modalità limitata")
+
+    # Inizializza bot
+    logger.info("🤖 Inizializzazione bot Telegram...")
+    application = init_bot()
+    logger.info("✅ Bot Telegram inizializzato")
+
+    # Usa sempre webhook mode per compatibilità con Render
+    logger.info("🔗 Configurazione webhook...")
+    port = int(os.getenv('PORT', 8080))
+    webhook_url = os.getenv('WEBHOOK_URL', f"https://{os.getenv('RENDER_EXTERNAL_URL', 'localhost')}/webhook")
+
+    if os.getenv('RENDER_EXTERNAL_URL'):
+        # Su Render, usa l'URL fornito
+        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
+
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT t.*, u.full_name as user_name
-            FROM tickets t
-            JOIN users u ON t.user_id = u.id
-            WHERE t.id = %s
-        """, (ticket_id,))
-        ticket = cur.fetchone()
-        cur.close()
-        conn.close()
-        return ticket
+        # Imposta webhook
+        application.bot.set_webhook(url=webhook_url)
+        logger.info(f"✅ Webhook impostato: {webhook_url}")
     except Exception as e:
-        logger.error(f"Errore get_ticket_by_id: {e}")
-        return None
+        logger.error(f"❌ Errore impostazione webhook: {e}")
+        return
+
+    # Avvia Flask server
+    logger.info(f"🌐 Avvio server Flask su porta {port}...")
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+if __name__ == "__main__":
+    main()

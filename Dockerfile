@@ -2,13 +2,14 @@ FROM python:3.12.9-slim-bookworm
 
 WORKDIR /app
 
-# Installa dipendenze di sistema
+# Installa dipendenze di sistema per psycopg2 e altre librerie
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     python3-dev \
     build-essential \
     libpq-dev \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
