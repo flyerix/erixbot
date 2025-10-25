@@ -1058,8 +1058,12 @@ def start_flask():
 async def setup_webhook_async():
     """Configura webhook in modo async"""
     try:
-        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
+        # Usa l'URL fornito dall'utente invece di generarlo automaticamente
+        render_external_url = os.getenv('RENDER_EXTERNAL_URL', 'https://erixbot-2.onrender.com')
+        webhook_url = f"{render_external_url}/webhook"
+
         logger.info(f"🔄 Configurazione webhook async: {webhook_url}")
+        logger.info(f"🌐 Base URL: {render_external_url}")
 
         # Prima rimuovi webhook esistente se necessario
         try:
@@ -1072,32 +1076,50 @@ async def setup_webhook_async():
                 logger.info(f"🗑️ Risultato rimozione: {delete_result}")
 
                 # Attesa per permettere a Telegram di processare la rimozione
-                import asyncio
                 await asyncio.sleep(1)
         except Exception as e:
             logger.warning(f"⚠️ Errore rimozione webhook esistente: {e}")
 
         # Configura nuovo webhook con parametri ottimali
         logger.info(f"🔧 Configurazione webhook: {webhook_url}")
-        webhook_info = await application.bot.set_webhook(
-            url=webhook_url,
-            max_connections=100,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
-        )
+        try:
+            webhook_info = await application.bot.set_webhook(
+                url=webhook_url,
+                max_connections=100,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            )
 
-        logger.info(f"✅ Webhook configurato: {webhook_info}")
+            logger.info(f"✅ Webhook configurato: {webhook_info}")
 
-        # Verifica webhook dopo un breve delay
-        await asyncio.sleep(1)
-        webhook_status = await application.bot.get_webhook_info()
-        logger.info(f"✅ Webhook status finale: {webhook_status}")
+            # Verifica webhook dopo un breve delay
+            await asyncio.sleep(1)
+            webhook_status = await application.bot.get_webhook_info()
+            logger.info(f"✅ Webhook status finale: {webhook_status}")
 
-        # Verifica che l'URL sia corretto
-        if webhook_status.url == webhook_url:
-            logger.info(f"🎉 Webhook configurato correttamente: {webhook_url}")
-        else:
-            logger.error(f"❌ Webhook URL non corrisponde! Atteso: {webhook_url}, Attuale: {webhook_status.url}")
+            # Verifica che l'URL sia corretto
+            if webhook_status.url == webhook_url:
+                logger.info(f"🎉 Webhook configurato correttamente: {webhook_url}")
+            else:
+                logger.error(f"❌ Webhook URL non corrisponde! Atteso: {webhook_url}, Attuale: {webhook_status.url}")
+
+        except Exception as e:
+            logger.error(f"❌ Errore configurazione webhook: {e}")
+            logger.error(f"❌ URL tentato: {webhook_url}")
+            logger.error(f"❌ Base URL: {render_external_url}")
+            # Se l'URL non funziona, prova senza /webhook
+            alternative_url = render_external_url
+            logger.info(f"🔄 Tentativo con URL alternativo: {alternative_url}")
+            try:
+                webhook_info = await application.bot.set_webhook(
+                    url=alternative_url,
+                    max_connections=100,
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query"]
+                )
+                logger.info(f"✅ Webhook alternativo configurato: {webhook_info}")
+            except Exception as e2:
+                logger.error(f"❌ Anche URL alternativo fallito: {e2}")
 
     except Exception as e:
         logger.error(f"❌ Errore configurazione webhook: {e}")
@@ -1122,8 +1144,12 @@ def manual_webhook_setup():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
+        # Usa l'URL fornito dall'utente
+        render_external_url = os.getenv('RENDER_EXTERNAL_URL', 'https://erixbot-2.onrender.com')
+        webhook_url = f"{render_external_url}/webhook"
+
         logger.info(f"🔧 Configurazione webhook manuale: {webhook_url}")
+        logger.info(f"🌐 Base URL: {render_external_url}")
 
         # Prima verifica status attuale
         try:
@@ -1142,28 +1168,44 @@ def manual_webhook_setup():
 
         # Configura nuovo webhook
         logger.info(f"🔧 Configurazione webhook: {webhook_url}")
-        webhook_info = loop.run_until_complete(application.bot.set_webhook(
-            url=webhook_url,
-            max_connections=100,
-            drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]
-        ))
+        try:
+            webhook_info = loop.run_until_complete(application.bot.set_webhook(
+                url=webhook_url,
+                max_connections=100,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            ))
 
-        # Verifica dopo setup
-        loop.run_until_complete(asyncio.sleep(1))
-        webhook_status = loop.run_until_complete(application.bot.get_webhook_info())
+            # Verifica dopo setup
+            loop.run_until_complete(asyncio.sleep(1))
+            webhook_status = loop.run_until_complete(application.bot.get_webhook_info())
 
-        logger.info(f"✅ Setup completato: {webhook_info}")
-        logger.info(f"✅ Status finale: {webhook_status}")
+            logger.info(f"✅ Setup completato: {webhook_info}")
+            logger.info(f"✅ Status finale: {webhook_status}")
+
+        except Exception as e:
+            logger.error(f"❌ Errore configurazione webhook: {e}")
+            logger.error(f"❌ URL tentato: {webhook_url}")
+            # Se l'URL non funziona, prova senza /webhook
+            alternative_url = render_external_url
+            logger.info(f"🔄 Tentativo con URL alternativo: {alternative_url}")
+            try:
+                webhook_info = loop.run_until_complete(application.bot.set_webhook(
+                    url=alternative_url,
+                    max_connections=100,
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query"]
+                ))
+                logger.info(f"✅ Webhook alternativo configurato: {webhook_info}")
+            except Exception as e2:
+                logger.error(f"❌ Anche URL alternativo fallito: {e2}")
 
         loop.close()
 
         return jsonify({
             "status": "success",
             "webhook_url": webhook_url,
-            "webhook_info": str(webhook_info),
-            "webhook_status": str(webhook_status),
-            "render_external_url": os.getenv('RENDER_EXTERNAL_URL'),
+            "render_external_url": render_external_url,
             "bot_token_configured": bool(TELEGRAM_TOKEN)
         }), 200
 
@@ -1172,31 +1214,58 @@ def manual_webhook_setup():
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/webhook/delete', methods=['POST'])
-def delete_webhook():
-    """Endpoint per rimuovere il webhook"""
+@app.route('/webhook/test', methods=['GET'])
+def test_webhook_url():
+    """Test se l'URL del webhook è accessibile"""
     try:
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        import requests
+        render_external_url = os.getenv('RENDER_EXTERNAL_URL', 'https://erixbot-2.onrender.com')
+        webhook_url = f"{render_external_url}/webhook"
 
-        logger.info("🗑️ Rimozione webhook...")
-        result = loop.run_until_complete(application.bot.delete_webhook())
-        loop.run_until_complete(asyncio.sleep(1))
-        status = loop.run_until_complete(application.bot.get_webhook_info())
-        logger.info(f"✅ Webhook rimosso: {result}")
-        logger.info(f"✅ Status dopo rimozione: {status}")
+        logger.info(f"🧪 Test accesso webhook: {webhook_url}")
 
-        loop.close()
+        # Test se l'URL è accessibile
+        response = requests.get(webhook_url, timeout=10)
 
         return jsonify({
-            "status": "success",
-            "delete_result": str(result),
-            "webhook_status": str(status)
+            "webhook_url": webhook_url,
+            "base_url": render_external_url,
+            "http_status": response.status_code,
+            "response": response.text[:200] if response.text else "No response",
+            "accessible": response.status_code == 200
         }), 200
 
     except Exception as e:
-        logger.error(f"❌ Errore rimozione webhook: {e}")
+        logger.error(f"❌ Errore test webhook URL: {e}")
+        return jsonify({
+            "error": str(e),
+            "webhook_url": f"{os.getenv('RENDER_EXTERNAL_URL', 'https://erixbot-2.onrender.com')}/webhook",
+            "accessible": False
+        }), 500
+
+@app.route('/webhook/seturl', methods=['POST'])
+def set_custom_webhook_url():
+    """Endpoint per impostare un URL webhook personalizzato"""
+    try:
+        import json
+        data = request.get_json()
+
+        if data and 'url' in data:
+            custom_url = data['url'].rstrip('/')
+            webhook_url = f"{custom_url}/webhook"
+
+            logger.info(f"🔧 Impostazione URL webhook personalizzato: {webhook_url}")
+
+            # Salva l'URL personalizzato in una variabile d'ambiente temporanea
+            os.environ['CUSTOM_WEBHOOK_URL'] = webhook_url
+
+            # Usa l'endpoint di setup con l'URL personalizzato
+            return manual_webhook_setup()
+        else:
+            return jsonify({"error": "URL non fornito"}), 400
+
+    except Exception as e:
+        logger.error(f"❌ Errore impostazione URL personalizzato: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/webhook/status', methods=['GET'])
@@ -1231,11 +1300,15 @@ def main():
     logger.info(f"   DATABASE_URL: {'*' * 20}...")
 
     # Verifica RENDER_EXTERNAL_URL
-    render_external_url = os.getenv('RENDER_EXTERNAL_URL')
+    render_external_url = os.getenv('RENDER_EXTERNAL_URL', 'https://erixbot-2.onrender.com')
     if not render_external_url:
         logger.error("❌ RENDER_EXTERNAL_URL non configurato!")
         logger.error("   Verifica che 'RENDER_EXTERNAL_URL' sia impostato su 'Auto' in Render Dashboard")
         return
+
+    # Usa l'URL corretto per il webhook
+    webhook_base_url = render_external_url
+    logger.info(f"🌐 Webhook base URL: {webhook_base_url}")
 
     # Inizializza database solo se disponibile
     if DATABASE_AVAILABLE:
