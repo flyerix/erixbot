@@ -67,14 +67,11 @@ def webhook_handler():
             # Crea update object
             update = Update.de_json(data, application.bot)
             if update:
-                # Processa l'update in modo async
+                # Processa l'update usando il queue sincrono (per webhook Flask)
                 try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(application.process_update(update))
-                    loop.close()
-                    logger.info("Update processato con successo")
+                    # Usa put_nowait per aggiungere l'update alla queue in modo sincrono
+                    application.update_queue.put_nowait(update)
+                    logger.info("Update aggiunto alla queue con successo")
                 except Exception as e:
                     logger.error(f"Errore processamento update: {e}")
                     return jsonify({"error": f"Update processing failed: {str(e)}"}), 500
@@ -120,6 +117,27 @@ def init_bot():
     """Inizializza il bot Telegram"""
     global application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Per python-telegram-bot v20.7, inizializza async
+    import asyncio
+
+    # Crea un nuovo event loop per l'inizializzazione
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        # Inizializza l'application
+        loop.run_until_complete(application.initialize())
+        logger.info("✅ Application inizializzata correttamente")
+    except Exception as e:
+        logger.error(f"❌ Errore inizializzazione Application: {e}")
+        # Fallback: prova senza initialize() per compatibilità
+        logger.info("🔄 Riprovo senza initialize()...")
+    finally:
+        loop.close()
+
+    # Configura per webhook mode (non polling)
+    application.update_queue = asyncio.Queue()
 
     # Registra i gestori di comandi
     application.add_handler(CommandHandler("start", start_command))
