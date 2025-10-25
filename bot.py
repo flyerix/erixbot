@@ -67,10 +67,13 @@ def webhook_handler():
             # Crea update object
             update = Update.de_json(data, application.bot)
             if update:
-                # Processa l'update direttamente (senza async per semplicità)
+                # Processa l'update in modo async
                 try:
-                    # Usa application.process_update invece di application.bot.process_update
-                    application.process_update(update)
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(application.process_update(update))
+                    loop.close()
                     logger.info("Update processato con successo")
                 except Exception as e:
                     logger.error(f"Errore processamento update: {e}")
@@ -1052,43 +1055,42 @@ def start_flask():
     """Avvia il server Flask in un thread separato"""
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)), debug=False)
 
-def setup_webhook_after_start():
-    """Configura webhook dopo l'avvio del server"""
+async def setup_webhook_async():
+    """Configura webhook in modo async"""
     try:
         webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
-        logger.info(f"🔄 Configurazione webhook post-start: {webhook_url}")
+        logger.info(f"🔄 Configurazione webhook async: {webhook_url}")
 
         # Prima rimuovi webhook esistente se necessario
         try:
-            current_webhook = application.bot.get_webhook_info()
+            current_webhook = await application.bot.get_webhook_info()
             logger.info(f"📋 Webhook attuale: {current_webhook}")
 
             if current_webhook.url and current_webhook.url != webhook_url:
                 logger.info(f"🗑️ Rimozione webhook esistente: {current_webhook.url}")
-                delete_result = application.bot.delete_webhook()
+                delete_result = await application.bot.delete_webhook()
                 logger.info(f"🗑️ Risultato rimozione: {delete_result}")
 
                 # Attesa per permettere a Telegram di processare la rimozione
-                import time
-                time.sleep(1)
+                import asyncio
+                await asyncio.sleep(1)
         except Exception as e:
             logger.warning(f"⚠️ Errore rimozione webhook esistente: {e}")
 
         # Configura nuovo webhook con parametri ottimali
         logger.info(f"🔧 Configurazione webhook: {webhook_url}")
-        webhook_info = application.bot.set_webhook(
+        webhook_info = await application.bot.set_webhook(
             url=webhook_url,
             max_connections=100,
             drop_pending_updates=True,
-            allowed_updates=["message", "callback_query"]  # Specifica solo i tipi di update necessari
+            allowed_updates=["message", "callback_query"]
         )
 
         logger.info(f"✅ Webhook configurato: {webhook_info}")
 
         # Verifica webhook dopo un breve delay
-        import time
-        time.sleep(1)
-        webhook_status = application.bot.get_webhook_info()
+        await asyncio.sleep(1)
+        webhook_status = await application.bot.get_webhook_info()
         logger.info(f"✅ Webhook status finale: {webhook_status}")
 
         # Verifica che l'URL sia corretto
@@ -1101,44 +1103,60 @@ def setup_webhook_after_start():
         logger.error(f"❌ Errore configurazione webhook: {e}")
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
 
+def setup_webhook_after_start():
+    """Wrapper per chiamare la funzione async"""
+    try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(setup_webhook_async())
+        loop.close()
+    except Exception as e:
+        logger.error(f"❌ Errore setup webhook: {e}")
+
 @app.route('/webhook/setup', methods=['POST'])
 def manual_webhook_setup():
     """Endpoint per configurare manualmente il webhook"""
     try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
         logger.info(f"🔧 Configurazione webhook manuale: {webhook_url}")
 
         # Prima verifica status attuale
         try:
-            current_webhook = application.bot.get_webhook_info()
+            current_webhook = loop.run_until_complete(application.bot.get_webhook_info())
             logger.info(f"📋 Webhook attuale prima del setup: {current_webhook}")
         except Exception as e:
             logger.warning(f"⚠️ Errore verifica webhook esistente: {e}")
 
         # Rimuovi webhook esistente
         logger.info("🗑️ Rimozione webhook esistente...")
-        delete_result = application.bot.delete_webhook()
+        delete_result = loop.run_until_complete(application.bot.delete_webhook())
         logger.info(f"🗑️ Risultato rimozione: {delete_result}")
 
         # Attesa per permettere a Telegram di processare
-        import time
-        time.sleep(1)
+        loop.run_until_complete(asyncio.sleep(1))
 
         # Configura nuovo webhook
         logger.info(f"🔧 Configurazione webhook: {webhook_url}")
-        webhook_info = application.bot.set_webhook(
+        webhook_info = loop.run_until_complete(application.bot.set_webhook(
             url=webhook_url,
             max_connections=100,
             drop_pending_updates=True,
             allowed_updates=["message", "callback_query"]
-        )
+        ))
 
         # Verifica dopo setup
-        time.sleep(1)
-        webhook_status = application.bot.get_webhook_info()
+        loop.run_until_complete(asyncio.sleep(1))
+        webhook_status = loop.run_until_complete(application.bot.get_webhook_info())
 
         logger.info(f"✅ Setup completato: {webhook_info}")
         logger.info(f"✅ Status finale: {webhook_status}")
+
+        loop.close()
 
         return jsonify({
             "status": "success",
@@ -1158,12 +1176,18 @@ def manual_webhook_setup():
 def delete_webhook():
     """Endpoint per rimuovere il webhook"""
     try:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         logger.info("🗑️ Rimozione webhook...")
-        result = application.bot.delete_webhook()
-        time.sleep(1)
-        status = application.bot.get_webhook_info()
+        result = loop.run_until_complete(application.bot.delete_webhook())
+        loop.run_until_complete(asyncio.sleep(1))
+        status = loop.run_until_complete(application.bot.get_webhook_info())
         logger.info(f"✅ Webhook rimosso: {result}")
         logger.info(f"✅ Status dopo rimozione: {status}")
+
+        loop.close()
 
         return jsonify({
             "status": "success",
@@ -1179,7 +1203,14 @@ def delete_webhook():
 def webhook_status():
     """Endpoint per verificare lo status del webhook"""
     try:
-        webhook_info = application.bot.get_webhook_info()
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        webhook_info = loop.run_until_complete(application.bot.get_webhook_info())
+
+        loop.close()
+
         return jsonify({
             "webhook_info": str(webhook_info),
             "render_external_url": os.getenv('RENDER_EXTERNAL_URL'),
