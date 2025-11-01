@@ -798,15 +798,8 @@ def main():
     # Start scheduler for notifications
     scheduler.start()
 
-    # Set webhook for Render deployment
-    if WEBHOOK_URL:
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.getenv('PORT', 10000)),
-            webhook_url=WEBHOOK_URL
-        )
-    else:
-        application.run_polling()
+    # For Render deployment, use polling (webhook requires additional dependencies)
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
