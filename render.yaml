@@ -6,17 +6,14 @@ services:
     startCommand: python app/main.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        value: ${TELEGRAM_BOT_TOKEN}
+        fromSecret: telegram_bot_token
       - key: DATABASE_URL
-        value: ${DATABASE_URL}
+        fromSecret: database_url
       - key: OPENAI_API_KEY
-        value: ${OPENAI_API_KEY}
+        fromSecret: openai_api_key
       - key: ADMIN_IDS
-        value: ${ADMIN_IDS}
+        fromSecret: admin_ids
       - key: PORT
         value: 10000
       - key: WEBHOOK_URL
-        value: ${WEBHOOK_URL}
-      - key: PYTHON_VERSION
-        value: 3.11.0
-
+        fromSecret: webhook_url
