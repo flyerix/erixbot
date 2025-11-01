@@ -41,7 +41,7 @@ class TicketMessage(Base):
     message = Column(Text)
     is_admin = Column(Boolean, default=False)
     is_ai = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     ticket = relationship("Ticket", back_populates="messages")
 
