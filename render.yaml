@@ -18,4 +18,5 @@ services:
       - key: WEBHOOK_URL
         value: ${WEBHOOK_URL}
       - key: PYTHON_VERSION
-        value: 3.11
+        value: 3.11.0
+
