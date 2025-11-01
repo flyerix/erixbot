@@ -194,16 +194,21 @@ Cosa vuoi fare con questa lista?
 
             # Try AI response first
             ai_response = await get_ai_response(message_text)
+            ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
+            session.add(ticket_message)
+
             if ai_response:
-                ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
                 ai_message = TicketMessage(ticket_id=ticket.id, user_id=0, message=ai_response, is_ai=True)
-                session.add(ticket_message)
                 session.add(ai_message)
                 session.commit()
 
-                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\nSe non risolto, un admin interverrà presto!")
+                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\nSe il problema non è risolto, puoi rispondere a questo messaggio per continuare il ticket!")
             else:
-                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\nUn admin ti risponderà presto! 👨‍💼")
+                # Se AI non può aiutare, marca il ticket come da escalare agli admin
+                ticket.status = 'escalated'
+                session.commit()
+
+                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\nIl tuo problema richiede assistenza umana. Un admin ti contatterà presto! 👨‍💼\n\nPuoi continuare a rispondere a questo messaggio per aggiungere dettagli.")
         finally:
             session.close()
         context.user_data.pop('action', None)
@@ -517,8 +522,7 @@ async def admin_lists_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         for list_obj in lists:
             expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
             list_text += f"📝 **{list_obj.name}**\n💰 {list_obj.cost} - 📅 {expiry_str}\n\n"
-            keyboard.append([InlineKeyboardButton(f"✏️ Modifica {list_obj.name}", callback_data=f'edit_list:{list_obj.id}')])
-            keyboard.append([InlineKeyboardButton(f"🗑️ Elimina {list_obj.name}", callback_data=f'delete_admin_list:{list_obj.id}')])
+            keyboard.append([InlineKeyboardButton(f"📋 {list_obj.name}", callback_data=f'select_list:{list_obj.id}')])
 
         keyboard.append([InlineKeyboardButton("➕ Crea Nuova Lista", callback_data='create_list')])
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
@@ -538,6 +542,34 @@ async def create_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.edit_message_text("📝 Inserisci il nome della nuova lista:")
     context.user_data['action'] = 'create_list_name'
+
+async def select_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        list_obj = session.query(List).filter(List.id == list_id).first()
+        if not list_obj:
+            await query.edit_message_text("❌ Lista non trovata.")
+            return
+
+        expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
+        keyboard = [
+            [InlineKeyboardButton("✏️ Modifica Lista", callback_data=f'edit_list:{list_id}')],
+            [InlineKeyboardButton("🗑️ Elimina Lista", callback_data=f'delete_admin_list:{list_id}')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_lists')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"📋 **Lista Selezionata: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi fare con questa lista?", reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
 
 async def edit_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -562,7 +594,7 @@ async def edit_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             [InlineKeyboardButton("💰 Modifica Costo", callback_data=f'edit_field:cost:{list_id}')],
             [InlineKeyboardButton("📅 Modifica Scadenza", callback_data=f'edit_field:expiry:{list_id}')],
             [InlineKeyboardButton("📝 Modifica Note", callback_data=f'edit_field:notes:{list_id}')],
-            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_lists')]
+            [InlineKeyboardButton("⬅️ Indietro", callback_data=f'select_list:{list_id}')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
@@ -614,7 +646,7 @@ async def delete_admin_list_callback(update: Update, context: ContextTypes.DEFAU
         context.user_data['delete_list_id'] = list_id
         keyboard = [
             [InlineKeyboardButton("✅ Sì, elimina", callback_data=f'confirm_admin_delete:{list_id}')],
-            [InlineKeyboardButton("❌ No, annulla", callback_data='admin_lists')]
+            [InlineKeyboardButton("❌ No, annulla", callback_data=f'select_list:{list_id}')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_obj.name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup, parse_mode='Markdown')
@@ -666,11 +698,45 @@ async def admin_tickets_callback(update: Update, context: ContextTypes.DEFAULT_T
         for ticket in tickets:
             status_emoji = "🟢" if ticket.status == 'open' else "🟡"
             ticket_text += f"{status_emoji} **#{ticket.id}** - {ticket.title}\n👤 User: {ticket.user_id}\n📅 {ticket.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
-            keyboard.append([InlineKeyboardButton(f"💬 Rispondi #{ticket.id}", callback_data=f'admin_reply_ticket:{ticket.id}')])
-            keyboard.append([InlineKeyboardButton(f"✅ Chiudi #{ticket.id}", callback_data=f'admin_close_ticket:{ticket.id}')])
-            keyboard.append([InlineKeyboardButton(f"📞 Contatta User #{ticket.id}", callback_data=f'admin_contact_user:{ticket.id}')])
+            keyboard.append([InlineKeyboardButton(f"🎫 {ticket.title[:30]}...", callback_data=f'select_ticket:{ticket.id}')])
 
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def select_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id).first()
+        if not ticket:
+            await query.edit_message_text("❌ Ticket non trovato.")
+            return
+
+        messages = session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket_id).order_by(TicketMessage.created_at).all()
+
+        ticket_text = f"🎫 **Ticket #{ticket.id}**\n📝 Titolo: {ticket.title}\n📄 Descrizione: {ticket.description}\n📊 Stato: {ticket.status}\n👤 User: {ticket.user_id}\n\n💬 **Messaggi:**\n\n"
+
+        for msg in messages:
+            sender = "🤖 AI" if msg.is_ai else ("👑 Admin" if msg.is_admin else "👤 User")
+            ticket_text += f"**{sender}:** {msg.message}\n\n"
+
+        keyboard = [
+            [InlineKeyboardButton("💬 Rispondi", callback_data=f'admin_reply_ticket:{ticket.id}')],
+            [InlineKeyboardButton("✅ Chiudi Ticket", callback_data=f'admin_close_ticket:{ticket.id}')],
+            [InlineKeyboardButton("📞 Contatta User", callback_data=f'admin_contact_user:{ticket.id}')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_tickets')]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
     finally:
@@ -785,11 +851,13 @@ def main():
     application.add_handler(CallbackQueryHandler(close_ticket_callback, pattern='^close_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
     application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
+    application.add_handler(CallbackQueryHandler(select_list_callback, pattern='^select_list:'))
     application.add_handler(CallbackQueryHandler(edit_list_callback, pattern='^edit_list:'))
     application.add_handler(CallbackQueryHandler(edit_field_callback, pattern='^edit_field:'))
     application.add_handler(CallbackQueryHandler(delete_admin_list_callback, pattern='^delete_admin_list:'))
     application.add_handler(CallbackQueryHandler(confirm_admin_delete_callback, pattern='^confirm_admin_delete:'))
     application.add_handler(CallbackQueryHandler(admin_tickets_callback, pattern='^admin_tickets$'))
+    application.add_handler(CallbackQueryHandler(select_ticket_callback, pattern='^select_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_reply_ticket_callback, pattern='^admin_reply_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
