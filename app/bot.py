@@ -765,7 +765,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         session.close()
 
 def main():
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).updater(None).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
