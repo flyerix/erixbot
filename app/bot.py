@@ -765,7 +765,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         session.close()
 
 def main():
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).updater(None).job_queue(None).build()
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
@@ -798,8 +798,15 @@ def main():
     # Start scheduler for notifications
     scheduler.start()
 
-    # For Render deployment, always use polling since webhook requires updater
-    application.run_polling()
+    # Set webhook for Render deployment
+    if WEBHOOK_URL:
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv('PORT', 10000)),
+            webhook_url=WEBHOOK_URL
+        )
+    else:
+        application.run_polling()
 
 if __name__ == '__main__':
     main()
