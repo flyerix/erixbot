@@ -295,6 +295,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'user_stats':
         session = SessionLocal()
         try:
+            # Log accesso statistiche
+            log_user_action(user_id, "view_user_stats")
+
             user_tickets = session.query(Ticket).filter(Ticket.user_id == user_id).count()
             user_notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).count()
             active_notifications = session.query(UserNotification).filter(
@@ -326,6 +329,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in user_stats for user {user_id}: {str(e)}")
+            await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle statistiche. Riprova più tardi.")
         finally:
             session.close()
 
