@@ -531,19 +531,66 @@ Cosa vuoi fare con questa lista?
         context.user_data.pop('edit_field', None)
         context.user_data.pop('edit_list_id', None)
 
-async def get_ai_response(problem_description):
+async def get_ai_response(problem_description, is_followup=False):
     try:
+        system_prompt = """Sei un assistente tecnico specializzato nel supporto clienti per un'applicazione installata su Amazon Firestick.
+
+La nostra applicazione offre contenuti streaming premium. Gli utenti possono avere problemi con:
+
+🔧 **Problemi Comuni Firestick:**
+• Applicazione che non si avvia
+• Video che si blocca o buffering
+• Audio fuori sincrono
+• Login che non funziona
+• Aggiornamenti che falliscono
+• Connessione internet instabile
+• Problemi di compatibilità Firestick
+
+🔧 **Problemi Comuni App:**
+• Contenuto che non carica
+• Qualità video bassa
+• Sottotitoli che non funzionano
+• Account bloccato/sospeso
+• Pagamenti non elaborati
+• Liste di riproduzione vuote
+
+📋 **Procedure Standard:**
+1. Riavvia l'applicazione
+2. Riavvia il Firestick (premi e tieni Select + Play per 5 secondi)
+3. Controlla connessione internet (minimo 10 Mbps)
+4. Cancella cache dell'app
+5. Verifica aggiornamenti disponibili
+6. Controlla spazio di archiviazione Firestick
+
+Rispondi SEMPRE in italiano, in modo amichevole e professionale. Se il problema è troppo complesso o richiede intervento manuale, dì chiaramente "Questo problema richiede assistenza tecnica specializzata. Un tecnico ti contatterà presto."
+
+NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi di risoluzione."""
+
+        if is_followup:
+            system_prompt += "\n\nQuesto è un followup a una conversazione precedente. Continua ad assistere l'utente con il problema già discusso."
+
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Sei un assistente tecnico per un bot di gestione liste. Rispondi in italiano in modo amichevole e risolvi problemi comuni di connessione. Se non puoi risolvere il problema, dì che non puoi aiutare e lascia che un admin intervenga."},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Problema: {problem_description}"}
             ],
-            max_tokens=300
+            max_tokens=400
         )
         ai_text = response.choices[0].message.content.strip()
-        if "non posso aiutare" in ai_text.lower() or "non riesco" in ai_text.lower():
+
+        # Se l'AI dice che non può risolvere, restituisci None per escalation
+        escalation_keywords = [
+            "richiede assistenza tecnica specializzata",
+            "tecnico ti contatterà",
+            "non posso risolvere",
+            "troppo complesso",
+            "intervento manuale"
+        ]
+
+        if any(keyword in ai_text.lower() for keyword in escalation_keywords):
             return None
+
         return ai_text
     except Exception as e:
         logger.error(f"AI response error: {e}")
@@ -724,7 +771,7 @@ async def reply_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     ticket_id = int(query.data.split(':')[1])
     context.user_data['reply_ticket'] = ticket_id
-    await query.edit_message_text("💬 Scrivi la tua risposta:")
+    await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
 
 async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
