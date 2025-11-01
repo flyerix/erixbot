@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from dotenv import load_dotenv
@@ -390,6 +391,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == 'search_list':
         session = SessionLocal()
         try:
+            # Log della ricerca
+            log_user_action(user_id, "search_list", f"Query: {message_text}")
+
             list_obj = session.query(List).filter(List.name == message_text).first()
             if list_obj:
                 expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
@@ -411,8 +415,16 @@ Cosa vuoi fare con questa lista?
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='Markdown')
+
+                # Log successo ricerca
+                log_list_event(list_obj.name, "searched", user_id, "Found and displayed")
             else:
                 await update.message.reply_text("❌ Lista non trovata. Assicurati di aver scritto il nome esatto.")
+                # Log ricerca fallita
+                log_user_action(user_id, "search_list_failed", f"Query: {message_text}")
+        except Exception as e:
+            logger.error(f"Error in search_list for user {user_id}: {str(e)}")
+            await update.message.reply_text("❌ Si è verificato un errore durante la ricerca. Riprova più tardi.")
         finally:
             session.close()
         context.user_data.pop('action', None)
@@ -1127,6 +1139,30 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Add error handler for Conflict errors
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log the error and send a telegram message to notify the developer."""
+        logger.error(msg="Exception while handling an update:", exc_info=context.error)
+
+        # Check if it's a Conflict error (multiple bot instances)
+        if isinstance(context.error, telegram.error.Conflict):
+            logger.critical("Conflict error detected - Multiple bot instances running!")
+            # You might want to send a notification to admin here
+            return
+
+        # For other errors, you might want to send a message to the user
+        if update and hasattr(update, 'effective_chat'):
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="❌ Si è verificato un errore. Riprova più tardi o contatta il supporto."
+                )
+            except Exception as e:
+                logger.error(f"Failed to send error message to user: {e}")
+
+    # Add error handler
+    application.add_error_handler(error_handler)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
