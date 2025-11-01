@@ -498,7 +498,7 @@ Cosa vuoi fare con questa lista?
         context.user_data.pop('create_list_cost', None)
         context.user_data.pop('create_list_expiry', None)
 
-    elif action.startswith('edit_field:'):
+    elif action and action.startswith('edit_field:'):
         parts = action.split(':')
         field = parts[1]
         list_id = int(parts[2])
