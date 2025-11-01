@@ -2,8 +2,7 @@ services:
   - type: web
     name: erixcastbot
     runtime: python
-    runtimeVersion: "3.11"
-    buildCommand: pip install -r requirements.txt
+    buildCommand: PYTHON_VERSION=3.11 pip install -r requirements.txt
     startCommand: python app/main.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
@@ -18,3 +17,5 @@ services:
         value: 10000
       - key: WEBHOOK_URL
         fromSecret: webhook_url
+      - key: PYTHON_VERSION
+        value: 3.11
