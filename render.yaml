@@ -17,3 +17,5 @@ services:
         value: 10000
       - key: WEBHOOK_URL
         fromSecret: webhook_url
+      - key: PYTHON_VERSION
+        value: 3.11
