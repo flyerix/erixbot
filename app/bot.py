@@ -1,0 +1,812 @@
+import os
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from dotenv import load_dotenv
+from openai import OpenAI
+from datetime import datetime, timedelta, timezone
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+scheduler = AsyncIOScheduler()
+
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
+
+def get_user_prefix(user_id):
+    return "👑 Admin" if is_admin(user_id) else "👤 User"
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    prefix = get_user_prefix(user_id)
+    keyboard = [
+        [InlineKeyboardButton("🔍 Cerca Lista", callback_data='search_list')],
+        [InlineKeyboardButton("🎫 Ticket Assistenza", callback_data='ticket_menu')],
+        [InlineKeyboardButton("❓ Aiuto", callback_data='help')]
+    ]
+    if is_admin(user_id):
+        keyboard.insert(0, [InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        f"Ciao {prefix}! 👋\n\nBenvenuto nel bot di gestione liste! 🎉\n\nCosa vuoi fare?",
+        reply_markup=reply_markup
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = """
+❓ **Guida Rapida - Risoluzione Problemi di Connessione** ❓
+
+Se hai problemi di connessione lenta o a scatti:
+
+🔄 **Prova prima:**
+• Spegni e riaccendi il dispositivo
+• Controlla la connessione Wi-Fi/4G
+• Chiudi altre app che usano internet
+
+📱 **Se il problema persiste:**
+• Apri un ticket di assistenza qui sotto
+• Descrivi il problema nel dettaglio
+• Un nostro assistente ti aiuterà! 🤝
+
+💡 **Consigli utili:**
+• Assicurati di avere una buona copertura
+• Evita di usare il bot in aree con segnale debole
+• Prova a riavviare il router se possibile
+"""
+    keyboard = [[InlineKeyboardButton("🎫 Apri Ticket Assistenza", callback_data='ticket_menu')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = query.from_user.id
+
+    if data == 'admin_panel':
+        if not is_admin(user_id):
+            await query.edit_message_text("❌ Accesso negato! Solo gli admin possono accedere.")
+            return
+        keyboard = [
+            [InlineKeyboardButton("📋 Gestisci Liste", callback_data='admin_lists')],
+            [InlineKeyboardButton("🎫 Gestisci Ticket", callback_data='admin_tickets')],
+            [InlineKeyboardButton("📊 Statistiche", callback_data='admin_stats')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("👑 **Admin Panel**\n\nScegli un'opzione:", reply_markup=reply_markup, parse_mode='Markdown')
+
+    elif data == 'search_list':
+        await query.edit_message_text("🔍 Inserisci il nome esatto della lista che vuoi cercare:")
+        context.user_data['action'] = 'search_list'
+
+    elif data == 'ticket_menu':
+        keyboard = [
+            [InlineKeyboardButton("📝 Apri Nuovo Ticket", callback_data='open_ticket')],
+            [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("🎫 **Menu Ticket**\n\nCosa vuoi fare?", reply_markup=reply_markup, parse_mode='Markdown')
+
+    elif data == 'help':
+        help_text = """
+❓ **Guida Rapida - Risoluzione Problemi di Connessione** ❓
+
+Se hai problemi di connessione lenta o a scatti:
+
+🔄 **Prova prima:**
+• Spegni e riaccendi il dispositivo
+• Controlla la connessione Wi-Fi/4G
+• Chiudi altre app che usano internet
+
+📱 **Se il problema persiste:**
+• Apri un ticket di assistenza qui sotto
+• Descrivi il problema nel dettaglio
+• Un nostro assistente ti aiuterà! 🤝
+
+💡 **Consigli utili:**
+• Assicurati di avere una buona copertura
+• Evita di usare il bot in aree con segnale debole
+• Prova a riavviare il router se possibile
+"""
+        keyboard = [[InlineKeyboardButton("🎫 Apri Ticket Assistenza", callback_data='ticket_menu')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+    elif data == 'back_to_main':
+        prefix = get_user_prefix(user_id)
+        keyboard = [
+            [InlineKeyboardButton("🔍 Cerca Lista", callback_data='search_list')],
+            [InlineKeyboardButton("🎫 Ticket Assistenza", callback_data='ticket_menu')],
+            [InlineKeyboardButton("❓ Aiuto", callback_data='help')]
+        ]
+        if is_admin(user_id):
+            keyboard.insert(0, [InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Ciao {prefix}! 👋\n\nBenvenuto nel bot di gestione liste! 🎉\n\nCosa vuoi fare?",
+            reply_markup=reply_markup
+        )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    message_text = update.message.text
+    action = context.user_data.get('action')
+
+    if action == 'search_list':
+        session = SessionLocal()
+        try:
+            list_obj = session.query(List).filter(List.name == message_text).first()
+            if list_obj:
+                expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
+                response = f"""
+📋 **Lista Trovata!**
+
+📝 **Nome:** {list_obj.name}
+💰 **Costo:** {list_obj.cost}
+📅 **Scadenza:** {expiry_str}
+📝 **Note:** {list_obj.notes or "Nessuna nota"}
+
+Cosa vuoi fare con questa lista?
+"""
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Rinnova", callback_data=f'renew_list:{list_obj.name}')],
+                    [InlineKeyboardButton("🗑️ Elimina", callback_data=f'delete_list:{list_obj.name}')],
+                    [InlineKeyboardButton("🔔 Notifiche Scadenza", callback_data=f'notify_list:{list_obj.name}')],
+                    [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                await update.message.reply_text("❌ Lista non trovata. Assicurati di aver scritto il nome esatto.")
+        finally:
+            session.close()
+        context.user_data.pop('action', None)
+
+    elif action == 'open_ticket':
+        context.user_data['ticket_title'] = message_text
+        context.user_data['action'] = 'ticket_description'
+        await update.message.reply_text("📝 Ora descrivi il problema in dettaglio:")
+
+    elif action == 'ticket_description':
+        title = context.user_data.get('ticket_title')
+        session = SessionLocal()
+        try:
+            ticket = Ticket(user_id=user_id, title=title, description=message_text)
+            session.add(ticket)
+            session.commit()
+
+            # Try AI response first
+            ai_response = await get_ai_response(message_text)
+            if ai_response:
+                ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
+                ai_message = TicketMessage(ticket_id=ticket.id, user_id=0, message=ai_response, is_ai=True)
+                session.add(ticket_message)
+                session.add(ai_message)
+                session.commit()
+
+                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\nSe non risolto, un admin interverrà presto!")
+            else:
+                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\nUn admin ti risponderà presto! 👨‍💼")
+        finally:
+            session.close()
+        context.user_data.pop('action', None)
+        context.user_data.pop('ticket_title', None)
+
+    elif action == 'create_list_name':
+        context.user_data['create_list_name'] = message_text
+        context.user_data['action'] = 'create_list_cost'
+        await update.message.reply_text("💰 Inserisci il costo della lista:")
+
+    elif action == 'create_list_cost':
+        context.user_data['create_list_cost'] = message_text
+        context.user_data['action'] = 'create_list_expiry'
+        await update.message.reply_text("📅 Inserisci la data di scadenza (formato: DD/MM/YYYY):")
+
+    elif action == 'create_list_expiry':
+        try:
+            expiry_date = datetime.strptime(message_text, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+            context.user_data['create_list_expiry'] = expiry_date
+            context.user_data['action'] = 'create_list_notes'
+            await update.message.reply_text("📝 Inserisci le note della lista (o 'nessuna' se non ce ne sono):")
+        except ValueError:
+            await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)")
+
+    elif action == 'create_list_notes':
+        session = SessionLocal()
+        try:
+            notes = message_text if message_text.lower() != 'nessuna' else None
+            new_list = List(
+                name=context.user_data['create_list_name'],
+                cost=context.user_data['create_list_cost'],
+                expiry_date=context.user_data['create_list_expiry'],
+                notes=notes
+            )
+            session.add(new_list)
+            session.commit()
+            await update.message.reply_text(f"✅ Lista **{new_list.name}** creata con successo!")
+        finally:
+            session.close()
+        context.user_data.pop('action', None)
+        context.user_data.pop('create_list_name', None)
+        context.user_data.pop('create_list_cost', None)
+        context.user_data.pop('create_list_expiry', None)
+
+    elif action.startswith('edit_field:'):
+        parts = action.split(':')
+        field = parts[1]
+        list_id = int(parts[2])
+
+        session = SessionLocal()
+        try:
+            list_obj = session.query(List).filter(List.id == list_id).first()
+            if not list_obj:
+                await update.message.reply_text("❌ Lista non trovata.")
+                return
+
+            if field == 'name':
+                list_obj.name = message_text
+            elif field == 'cost':
+                list_obj.cost = message_text
+            elif field == 'expiry':
+                try:
+                    list_obj.expiry_date = datetime.strptime(message_text, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+                except ValueError:
+                    await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY")
+                    return
+            elif field == 'notes':
+                list_obj.notes = message_text if message_text.lower() != 'nessuna' else None
+
+            session.commit()
+            await update.message.reply_text(f"✅ Campo **{field}** aggiornato con successo!")
+        finally:
+            session.close()
+        context.user_data.pop('action', None)
+        context.user_data.pop('edit_field', None)
+        context.user_data.pop('edit_list_id', None)
+
+async def get_ai_response(problem_description):
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Sei un assistente tecnico per un bot di gestione liste. Rispondi in italiano in modo amichevole e risolvi problemi comuni di connessione. Se non puoi risolvere il problema, dì che non puoi aiutare e lascia che un admin intervenga."},
+                {"role": "user", "content": f"Problema: {problem_description}"}
+            ],
+            max_tokens=300
+        )
+        ai_text = response.choices[0].message.content.strip()
+        if "non posso aiutare" in ai_text.lower() or "non riesco" in ai_text.lower():
+            return None
+        return ai_text
+    except Exception as e:
+        logger.error(f"AI response error: {e}")
+        return None
+
+async def renew_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_name = query.data.split(':', 1)[1]
+    context.user_data['renew_list'] = list_name
+    keyboard = [
+        [InlineKeyboardButton("1 Mese (€15)", callback_data='renew_months:1')],
+        [InlineKeyboardButton("3 Mesi (€45)", callback_data='renew_months:3')],
+        [InlineKeyboardButton("6 Mesi (€90)", callback_data='renew_months:6')],
+        [InlineKeyboardButton("12 Mesi (€180)", callback_data='renew_months:12')],
+        [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"🔄 Vuoi rinnovare **{list_name}** per quanti mesi?\n\n💰 Ogni mese costa €15", reply_markup=reply_markup, parse_mode='Markdown')
+
+async def renew_months_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    months = int(query.data.split(':')[1])
+    list_name = context.user_data.get('renew_list')
+    cost = months * 15
+
+    context.user_data['renew_months'] = months
+    keyboard = [
+        [InlineKeyboardButton("✅ Conferma", callback_data=f'confirm_renew:{months}')],
+        [InlineKeyboardButton("❌ Annulla", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"🔄 Confermi il rinnovo di **{list_name}** per **{months} mesi**?\n\n💰 Costo totale: **€{cost}**\n\nQuesta richiesta verrà inviata agli admin per l'approvazione.", reply_markup=reply_markup, parse_mode='Markdown')
+
+async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    months = int(query.data.split(':')[1])
+    list_name = context.user_data.get('renew_list')
+    user_id = query.from_user.id
+
+    # Here we would send notification to admin - for now just confirm
+    await query.edit_message_text(f"✅ Richiesta di rinnovo inviata!\n\n📋 Lista: {list_name}\n⏰ Durata: {months} mesi\n👤 User ID: {user_id}\n\nGli admin riceveranno la notifica per l'approvazione. 🎉")
+
+    context.user_data.pop('renew_list', None)
+    context.user_data.pop('renew_months', None)
+
+async def delete_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_name = query.data.split(':', 1)[1]
+
+    keyboard = [
+        [InlineKeyboardButton("✅ Sì, elimina", callback_data=f'confirm_delete:{list_name}')],
+        [InlineKeyboardButton("❌ No, annulla", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup, parse_mode='Markdown')
+
+async def confirm_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_name = query.data.split(':', 1)[1]
+
+    # Here we would send delete request to admin - for now just confirm
+    await query.edit_message_text(f"✅ Richiesta di eliminazione inviata!\n\n📋 Lista: {list_name}\n\nGli admin riceveranno la notifica per l'approvazione. 🗑️")
+
+async def notify_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_name = query.data.split(':', 1)[1]
+    context.user_data['notify_list'] = list_name
+
+    keyboard = [
+        [InlineKeyboardButton("1 giorno prima", callback_data='notify_days:1')],
+        [InlineKeyboardButton("3 giorni prima", callback_data='notify_days:3')],
+        [InlineKeyboardButton("5 giorni prima", callback_data='notify_days:5')],
+        [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(f"🔔 Quando vuoi ricevere il promemoria per la scadenza di **{list_name}**?", reply_markup=reply_markup, parse_mode='Markdown')
+
+async def notify_days_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    days = int(query.data.split(':')[1])
+    list_name = context.user_data.get('notify_list')
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        # Remove existing notification for this user/list
+        session.query(UserNotification).filter(
+            UserNotification.user_id == user_id,
+            UserNotification.list_name == list_name
+        ).delete()
+
+        # Add new notification
+        notification = UserNotification(user_id=user_id, list_name=list_name, days_before=days)
+        session.add(notification)
+        session.commit()
+
+        await query.edit_message_text(f"✅ Notifica impostata!\n\n🔔 Riceverai un promemoria **{days} giorni** prima della scadenza di **{list_name}**. 🎉")
+    finally:
+        session.close()
+
+    context.user_data.pop('notify_list', None)
+
+async def open_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("📝 Inserisci il titolo del ticket:")
+    context.user_data['action'] = 'open_ticket'
+
+async def my_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        tickets = session.query(Ticket).filter(Ticket.user_id == user_id).all()
+        if not tickets:
+            await query.edit_message_text("📋 Non hai ticket aperti al momento.")
+            return
+
+        ticket_list = "📋 **I Tuoi Ticket:**\n\n"
+        keyboard = []
+        for ticket in tickets:
+            status_emoji = "🟢" if ticket.status == 'open' else "🔴" if ticket.status == 'closed' else "🟡"
+            ticket_list += f"{status_emoji} **#{ticket.id}** - {ticket.title}\n"
+            keyboard.append([InlineKeyboardButton(f"#{ticket.id} - {ticket.title}", callback_data=f'view_ticket:{ticket.id}')])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='ticket_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(ticket_list, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def view_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if not ticket:
+            await query.edit_message_text("❌ Ticket non trovato.")
+            return
+
+        messages = session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket_id).order_by(TicketMessage.created_at).all()
+
+        ticket_text = f"🎫 **Ticket #{ticket.id}**\n📝 Titolo: {ticket.title}\n📄 Descrizione: {ticket.description}\n📊 Stato: {ticket.status}\n\n💬 **Messaggi:**\n\n"
+
+        for msg in messages:
+            sender = "🤖 AI" if msg.is_ai else ("👑 Admin" if msg.is_admin else "👤 Tu")
+            ticket_text += f"**{sender}:** {msg.message}\n\n"
+
+        keyboard = []
+        if ticket.status == 'open':
+            keyboard.append([InlineKeyboardButton("💬 Rispondi", callback_data=f'reply_ticket:{ticket.id}')])
+            keyboard.append([InlineKeyboardButton("✅ Chiudi Ticket", callback_data=f'close_ticket:{ticket.id}')])
+        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='my_tickets')])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def reply_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    context.user_data['reply_ticket'] = ticket_id
+    await query.edit_message_text("💬 Scrivi la tua risposta:")
+
+async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if ticket:
+            ticket.status = 'closed'
+            session.commit()
+            await query.edit_message_text("✅ Ticket chiuso con successo!")
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def admin_lists_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        lists = session.query(List).all()
+        if not lists:
+            keyboard = [
+                [InlineKeyboardButton("➕ Crea Nuova Lista", callback_data='create_list')],
+                [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("📋 Nessuna lista presente nel database.\n\nVuoi crearne una nuova?", reply_markup=reply_markup)
+            return
+
+        list_text = "📋 **Liste Disponibili:**\n\n"
+        keyboard = []
+        for list_obj in lists:
+            expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
+            list_text += f"📝 **{list_obj.name}**\n💰 {list_obj.cost} - 📅 {expiry_str}\n\n"
+            keyboard.append([InlineKeyboardButton(f"✏️ Modifica {list_obj.name}", callback_data=f'edit_list:{list_obj.id}')])
+            keyboard.append([InlineKeyboardButton(f"🗑️ Elimina {list_obj.name}", callback_data=f'delete_admin_list:{list_obj.id}')])
+
+        keyboard.append([InlineKeyboardButton("➕ Crea Nuova Lista", callback_data='create_list')])
+        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(list_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def create_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    await query.edit_message_text("📝 Inserisci il nome della nuova lista:")
+    context.user_data['action'] = 'create_list_name'
+
+async def edit_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        list_obj = session.query(List).filter(List.id == list_id).first()
+        if not list_obj:
+            await query.edit_message_text("❌ Lista non trovata.")
+            return
+
+        context.user_data['edit_list_id'] = list_id
+        keyboard = [
+            [InlineKeyboardButton("📝 Modifica Nome", callback_data=f'edit_field:name:{list_id}')],
+            [InlineKeyboardButton("💰 Modifica Costo", callback_data=f'edit_field:cost:{list_id}')],
+            [InlineKeyboardButton("📅 Modifica Scadenza", callback_data=f'edit_field:expiry:{list_id}')],
+            [InlineKeyboardButton("📝 Modifica Note", callback_data=f'edit_field:notes:{list_id}')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_lists')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
+        await query.edit_message_text(f"✏️ **Modifica Lista: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi modificare?", reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(':')
+    field = parts[1]
+    list_id = int(parts[2])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    context.user_data['edit_field'] = field
+    context.user_data['edit_list_id'] = list_id
+
+    field_names = {
+        'name': 'nome',
+        'cost': 'costo',
+        'expiry': 'scadenza (formato: DD/MM/YYYY)',
+        'notes': 'note'
+    }
+
+    await query.edit_message_text(f"📝 Inserisci il nuovo {field_names[field]}:")
+
+async def delete_admin_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        list_obj = session.query(List).filter(List.id == list_id).first()
+        if not list_obj:
+            await query.edit_message_text("❌ Lista non trovata.")
+            return
+
+        context.user_data['delete_list_id'] = list_id
+        keyboard = [
+            [InlineKeyboardButton("✅ Sì, elimina", callback_data=f'confirm_admin_delete:{list_id}')],
+            [InlineKeyboardButton("❌ No, annulla", callback_data='admin_lists')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_obj.name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def confirm_admin_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    list_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        list_obj = session.query(List).filter(List.id == list_id).first()
+        if list_obj:
+            session.delete(list_obj)
+            session.commit()
+            await query.edit_message_text(f"✅ Lista **{list_obj.name}** eliminata con successo!")
+        else:
+            await query.edit_message_text("❌ Lista non trovata.")
+    finally:
+        session.close()
+
+async def admin_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        tickets = session.query(Ticket).filter(Ticket.status.in_(['open', 'escalated'])).all()
+        if not tickets:
+            keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("🎫 Nessun ticket aperto al momento.", reply_markup=reply_markup)
+            return
+
+        ticket_text = "🎫 **Ticket Aperti:**\n\n"
+        keyboard = []
+        for ticket in tickets:
+            status_emoji = "🟢" if ticket.status == 'open' else "🟡"
+            ticket_text += f"{status_emoji} **#{ticket.id}** - {ticket.title}\n👤 User: {ticket.user_id}\n📅 {ticket.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+            keyboard.append([InlineKeyboardButton(f"💬 Rispondi #{ticket.id}", callback_data=f'admin_reply_ticket:{ticket.id}')])
+            keyboard.append([InlineKeyboardButton(f"✅ Chiudi #{ticket.id}", callback_data=f'admin_close_ticket:{ticket.id}')])
+            keyboard.append([InlineKeyboardButton(f"📞 Contatta User #{ticket.id}", callback_data=f'admin_contact_user:{ticket.id}')])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def admin_reply_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    context.user_data['admin_reply_ticket'] = ticket_id
+    await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
+
+async def admin_close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id).first()
+        if ticket:
+            ticket.status = 'closed'
+            session.commit()
+            await query.edit_message_text(f"✅ Ticket #{ticket_id} chiuso con successo!")
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def admin_contact_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id).first()
+        if ticket:
+            # Here we would implement direct messaging to user
+            # For now, just show user info
+            await query.edit_message_text(f"📞 Contatto diretto con user {ticket.user_id} per ticket #{ticket_id}\n\nQuesta funzionalità sarà implementata per permettere il contatto diretto.")
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        total_lists = session.query(List).count()
+        total_tickets = session.query(Ticket).count()
+        open_tickets = session.query(Ticket).filter(Ticket.status == 'open').count()
+        closed_tickets = session.query(Ticket).filter(Ticket.status == 'closed').count()
+
+        stats_text = f"""
+📊 **Statistiche del Bot**
+
+📋 **Liste:** {total_lists}
+🎫 **Ticket Totali:** {total_tickets}
+🟢 **Ticket Aperti:** {open_tickets}
+🔴 **Ticket Chiusi:** {closed_tickets}
+"""
+
+        keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+def main():
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main)$'))
+    application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
+    application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
+    application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
+    application.add_handler(CallbackQueryHandler(delete_list_callback, pattern='^delete_list:'))
+    application.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern='^confirm_delete:'))
+    application.add_handler(CallbackQueryHandler(notify_list_callback, pattern='^notify_list:'))
+    application.add_handler(CallbackQueryHandler(notify_days_callback, pattern='^notify_days:'))
+    application.add_handler(CallbackQueryHandler(open_ticket_callback, pattern='^open_ticket$'))
+    application.add_handler(CallbackQueryHandler(my_tickets_callback, pattern='^my_tickets$'))
+    application.add_handler(CallbackQueryHandler(view_ticket_callback, pattern='^view_ticket:'))
+    application.add_handler(CallbackQueryHandler(reply_ticket_callback, pattern='^reply_ticket:'))
+    application.add_handler(CallbackQueryHandler(close_ticket_callback, pattern='^close_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
+    application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
+    application.add_handler(CallbackQueryHandler(edit_list_callback, pattern='^edit_list:'))
+    application.add_handler(CallbackQueryHandler(edit_field_callback, pattern='^edit_field:'))
+    application.add_handler(CallbackQueryHandler(delete_admin_list_callback, pattern='^delete_admin_list:'))
+    application.add_handler(CallbackQueryHandler(confirm_admin_delete_callback, pattern='^confirm_admin_delete:'))
+    application.add_handler(CallbackQueryHandler(admin_tickets_callback, pattern='^admin_tickets$'))
+    application.add_handler(CallbackQueryHandler(admin_reply_ticket_callback, pattern='^admin_reply_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
+    application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern='^admin_stats$'))
+
+    # Start scheduler for notifications
+    scheduler.start()
+
+    # Set webhook for Render deployment
+    if WEBHOOK_URL:
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.getenv('PORT', 10000)),
+            webhook_url=WEBHOOK_URL
+        )
+    else:
+        application.run_polling()
+
+if __name__ == '__main__':
+    main()
