@@ -1597,7 +1597,12 @@ def main():
         if isinstance(context.error, telegram.error.Conflict):
             logger.critical("Conflict error detected - Multiple bot instances running!")
             logger.critical("Terminating this bot instance to prevent conflicts...")
+            # Force immediate shutdown
+            import asyncio
             import sys
+            # Stop the event loop and exit
+            loop = asyncio.get_event_loop()
+            loop.stop()
             sys.exit(1)  # Exit with error code to trigger restart policy
 
         # Check for NetworkError (connection issues)
