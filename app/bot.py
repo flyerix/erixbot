@@ -706,6 +706,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text
     action = context.user_data.get('action')
 
+    logger.info(f"📨 Message received from user {user_id}: '{message_text}' (action: {action})")
+
     # Check if this is a reply to a ticket
     if update.message.reply_to_message and not action:
         # This is a reply to a ticket message
@@ -2276,14 +2278,20 @@ async def run_bot_main_loop():
 
         await update.message.reply_text("🎫 **Supporto Tecnico**\n\nCome possiamo aiutarti?", reply_markup=reply_markup, parse_mode='Markdown')
 
+    # Register all handlers with logging
+    logger.info("📝 Registering command handlers...")
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("dashboard", dashboard_command))
     application.add_handler(CommandHandler("renew", renew_command))
     application.add_handler(CommandHandler("support", support_command))
+
+    logger.info("📝 Registering message handlers...")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
+
+    logger.info("📝 Registering callback query handlers...")
     application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
@@ -2314,6 +2322,8 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
     application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
     application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
+
+    logger.info("✅ All handlers registered successfully")
 
     # Pianifica backup automatico giornaliero
     scheduler.add_job(create_backup, CronTrigger(hour=2, minute=0))  # Ogni giorno alle 2:00
