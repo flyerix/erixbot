@@ -615,7 +615,19 @@ Cosa vuoi fare con questa lista?
                 session.add(ai_message)
                 session.commit()
 
-                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\nSe il problema non è risolto, puoi rispondere a questo messaggio per continuare il ticket!")
+                # Create conversation keyboard
+                keyboard = [
+                    [InlineKeyboardButton("💬 Continua Conversazione", callback_data=f'continue_ticket:{ticket.id}')],
+                    [InlineKeyboardButton("✅ Problema Risolto", callback_data=f'close_ticket_user:{ticket.id}')],
+                    [InlineKeyboardButton("👨‍💼 Parla con Admin", callback_data=f'escalate_ticket:{ticket.id}')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\n💬 **Questa conversazione rimane aperta!**\n\nPuoi continuare a scrivere messaggi qui per ricevere altre risposte dall'AI, oppure scegliere un'opzione:",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
 
                 # Log evento ticket
                 log_ticket_event(ticket.id, "created_with_ai", user_id, f"AI Response: {len(ai_response)} chars")
@@ -625,7 +637,17 @@ Cosa vuoi fare con questa lista?
                 ticket.status = 'escalated'
                 session.commit()
 
-                await update.message.reply_text(f"🎫 **Ticket #{ticket.id} creato!**\n\nIl tuo problema richiede assistenza umana. Un admin ti contatterà presto! 👨‍💼\n\nPuoi continuare a rispondere a questo messaggio per aggiungere dettagli.")
+                keyboard = [
+                    [InlineKeyboardButton("📝 Aggiungi Dettagli", callback_data=f'continue_ticket:{ticket.id}')],
+                    [InlineKeyboardButton("👨‍💼 Contatta Admin", callback_data=f'contact_admin:{ticket.id}')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 Il mio assistente automatico non è in grado di risolvere questo problema.\n\n👨‍💼 **Un amministratore ti contatterà presto per assistenza personalizzata.**\n\n💬 **Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui:**",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
 
                 # Log escalation
                 log_ticket_event(ticket.id, "escalated_to_admin", user_id, "AI could not resolve")
