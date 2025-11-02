@@ -249,8 +249,11 @@ async def create_backup():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
+    logger.info(f"👋 User {user_id} started the bot")
+
     # Check rate limit
     if not check_rate_limit(user_id):
+        logger.warning(f"⚠️ Rate limit exceeded for user {user_id}")
         await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
         return
 
@@ -289,7 +292,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+        logger.info(f"✅ Welcome message sent to user {user_id}")
 
+    except Exception as e:
+        logger.error(f"❌ Error in start command for user {user_id}: {e}")
+        await update.message.reply_text("❌ Si è verificato un errore. Riprova più tardi.")
     finally:
         session.close()
 
@@ -2069,6 +2076,36 @@ def main():
     # Main bot loop with enhanced stability
     try:
         logger.info("🚀 Starting ErixCast Bot - 24/7 Service Active")
+        logger.info("🤖 Bot is now listening for messages...")
+
+        # Test bot connectivity and clear any existing webhooks
+        try:
+            # Delete any existing webhook first
+            logger.info("🧹 Deleting any existing webhooks...")
+            await application.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook deleted successfully")
+
+            # Test bot connectivity
+            bot_info = await application.bot.get_me()
+            logger.info(f"✅ Bot connected successfully as @{bot_info.username} (ID: {bot_info.id})")
+
+            # Verify bot can receive messages (send a test message to admin if configured)
+            if ADMIN_IDS:
+                try:
+                    test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')
+                    await application.bot.send_message(
+                        chat_id=ADMIN_IDS[0],
+                        text=test_message,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Test message sent to admin {ADMIN_IDS[0]}")
+                except Exception as msg_e:
+                    logger.warning(f"⚠️ Could not send test message to admin: {msg_e}")
+
+        except Exception as bot_e:
+            logger.error(f"❌ Bot connection failed: {bot_e}")
+            raise
+
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
