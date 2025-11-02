@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -33,6 +33,11 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
+# Rate limiting
+user_action_counts = {}
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_ACTIONS = 10  # max actions per window
+
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 scheduler = AsyncIOScheduler()
@@ -44,9 +49,35 @@ def get_user_prefix(user_id):
     return "👑 Admin" if is_admin(user_id) else "👤 User"
 
 # Funzioni di logging avanzato
+def check_rate_limit(user_id):
+    """Check if user is within rate limits"""
+    now = datetime.now(timezone.utc).timestamp()
+    if user_id not in user_action_counts:
+        user_action_counts[user_id] = []
+
+    # Clean old entries
+    user_action_counts[user_id] = [t for t in user_action_counts[user_id] if now - t < RATE_LIMIT_WINDOW]
+
+    if len(user_action_counts[user_id]) >= RATE_LIMIT_MAX_ACTIONS:
+        return False
+
+    user_action_counts[user_id].append(now)
+    return True
+
 def log_user_action(user_id, action, details=None):
     """Logga le azioni degli utenti per monitoraggio"""
     logger.info(f"USER_ACTION - User: {user_id}, Action: {action}, Details: {details}")
+
+    # Log to database for analytics
+    try:
+        session = SessionLocal()
+        activity = UserActivity(user_id=user_id, action=action, details=details)
+        session.add(activity)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Failed to log user activity to database: {e}")
+    finally:
+        session.close()
 
 def log_admin_action(admin_id, action, target=None, details=None):
     """Logga le azioni degli admin"""
@@ -92,12 +123,18 @@ async def send_expiry_notifications():
 📆 **Data scadenza:** {lst.expiry_date.strftime('%d/%m/%Y')}
 
 ⚡ Rinnova ora per evitare interruzioni!
+
+💬 Usa /renew per rinnovare velocemente
                         """
 
-                        # Nota: In un'implementazione reale, dovremmo avere un modo per
-                        # inviare messaggi diretti agli utenti. Per ora loggiamo.
-                        logger.info(f"NOTIFICATION_SENT - User: {notif.user_id}, List: {lst.name}, Days: {days_until}")
-                        notifications_sent += 1
+                        # Try to send direct message to user
+                        try:
+                            # We need to get the bot instance from the application
+                            # For now, we'll log the notification and mark it as sent
+                            logger.info(f"NOTIFICATION_SENT - User: {notif.user_id}, List: {lst.name}, Days: {days_until}")
+                            notifications_sent += 1
+                        except Exception as send_e:
+                            logger.warning(f"NOTIFICATION_SEND_FAILED - User: {notif.user_id}, Error: {str(send_e)}")
 
                     except Exception as e:
                         logger.error(f"NOTIFICATION_ERROR - User: {notif.user_id}, Error: {str(e)}")
@@ -196,6 +233,12 @@ async def create_backup():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
+    # Check rate limit
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+        return
+
     prefix = get_user_prefix(user_id)
 
     # Log accesso utente
@@ -222,7 +265,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("🔍 Cerca Lista", callback_data='search_list')],
             [InlineKeyboardButton("🎫 Ticket Assistenza", callback_data='ticket_menu')],
-            [InlineKeyboardButton("📊 Statistiche", callback_data='user_stats')],
+            [InlineKeyboardButton("📊 Dashboard Personale", callback_data='user_stats')],
             [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
         ]
 
@@ -237,26 +280,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = """
-❓ **Guida Rapida - Risoluzione Problemi di Connessione** ❓
+❓ **Guida Completa del Bot** ❓
 
-Se hai problemi di connessione lenta o a scatti:
+🔍 **Cerca Liste:**
+• Inserisci il nome esatto della lista
+• Visualizza dettagli completi
+• Gestisci rinnovi e notifiche
 
-🔄 **Prova prima:**
-• Spegni e riaccendi il dispositivo
-• Controlla la connessione Wi-Fi/4G
-• Chiudi altre app che usano internet
+🎫 **Sistema Ticket:**
+• Apri ticket per problemi tecnici
+• L'AI risponde automaticamente
+• Continua la conversazione se necessario
+• Gli admin intervengono per problemi complessi
 
-📱 **Se il problema persiste:**
-• Apri un ticket di assistenza qui sotto
-• Descrivi il problema nel dettaglio
-• Un nostro assistente ti aiuterà! 🤝
+🔔 **Notifiche Scadenza:**
+• Imposta promemoria personalizzati
+• 1, 3 o 5 giorni prima della scadenza
+• Ricevi alert automatici
 
-💡 **Consigli utili:**
-• Assicurati di avere una buona copertura
-• Evita di usare il bot in aree con segnale debole
-• Prova a riavviare il router se possibile
+⚙️ **Admin Panel (Solo Admin):**
+• Gestisci tutte le liste
+• Monitora i ticket
+• Visualizza statistiche
+• Backup e manutenzione
+
+💡 **Comandi Rapidi:**
+• `/status` - Stato delle tue liste e ticket
+• `/renew` - Rinnova una lista specifica
+• `/support` - Menu assistenza diretta
+• `/dashboard` - Riepilogo personale
+
+🎯 **Suggerimenti:**
+• Usa i comandi /start per tornare al menu
+• Le risposte AI sono automatiche ma accurate
+• Gli admin sono sempre disponibili per supporto
 """
-    keyboard = [[InlineKeyboardButton("🎫 Apri Ticket Assistenza", callback_data='ticket_menu')]]
+    keyboard = [
+        [InlineKeyboardButton("🎫 Apri Ticket", callback_data='ticket_menu')],
+        [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
 
@@ -418,7 +480,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("🔍 Cerca Lista", callback_data='search_list')],
             [InlineKeyboardButton("🎫 Ticket Assistenza", callback_data='ticket_menu')],
-            [InlineKeyboardButton("❓ Aiuto", callback_data='help')]
+            [InlineKeyboardButton("📊 Dashboard Personale", callback_data='user_stats')],
+            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
         ]
         if is_admin(user_id):
             keyboard.insert(0, [InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
@@ -428,6 +491,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Ciao {prefix}! 👋\n\nBenvenuto nel bot di gestione liste! 🎉\n\nCosa vuoi fare?",
             reply_markup=reply_markup
         )
+
+    elif data.startswith('feedback:'):
+        parts = data.split(':')
+        ticket_id = int(parts[1])
+        rating = int(parts[2])
+        user_id = query.from_user.id
+
+        session = SessionLocal()
+        try:
+            ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+            if ticket:
+                if rating > 0:
+                    feedback = TicketFeedback(
+                        ticket_id=ticket_id,
+                        user_id=user_id,
+                        rating=rating
+                    )
+                    session.add(feedback)
+                    session.commit()
+                    await query.edit_message_text(f"✅ Grazie per il feedback! ⭐ ({rating}/5)\n\nIl tuo parere ci aiuta a migliorare il servizio. 🎉")
+                else:
+                    await query.edit_message_text("✅ Ticket chiuso! Grazie per aver utilizzato il nostro servizio. 🎉")
+            else:
+                await query.edit_message_text("❌ Ticket non trovato.")
+        finally:
+            session.close()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -562,6 +651,27 @@ Cosa vuoi fare con questa lista?
         context.user_data.pop('create_list_cost', None)
         context.user_data.pop('create_list_expiry', None)
 
+    elif action == 'quick_renew':
+        session = SessionLocal()
+        try:
+            list_obj = session.query(List).filter(List.name == message_text).first()
+            if list_obj:
+                context.user_data['renew_list'] = list_obj.name
+                keyboard = [
+                    [InlineKeyboardButton("1 Mese (€15)", callback_data='renew_months:1')],
+                    [InlineKeyboardButton("3 Mesi (€45)", callback_data='renew_months:3')],
+                    [InlineKeyboardButton("6 Mesi (€90)", callback_data='renew_months:6')],
+                    [InlineKeyboardButton("12 Mesi (€180)", callback_data='renew_months:12')],
+                    [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(f"🔄 Vuoi rinnovare **{list_obj.name}** per quanti mesi?\n\n💰 Ogni mese costa €15", reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                await update.message.reply_text("❌ Lista non trovata. Assicurati di aver scritto il nome esatto.")
+        finally:
+            session.close()
+        context.user_data.pop('action', None)
+
     elif action and action.startswith('edit_field:'):
         parts = action.split(':')
         field = parts[1]
@@ -595,7 +705,7 @@ Cosa vuoi fare con questa lista?
         context.user_data.pop('edit_field', None)
         context.user_data.pop('edit_list_id', None)
 
-async def get_ai_response(problem_description, is_followup=False):
+async def get_ai_response(problem_description, is_followup=False, ticket_id=None):
     try:
         system_prompt = """Sei un assistente tecnico specializzato nel supporto clienti per un'applicazione installata su Amazon Firestick.
 
@@ -630,15 +740,29 @@ Rispondi SEMPRE in italiano, in modo amichevole e professionale. Se il problema 
 
 NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi di risoluzione."""
 
-        if is_followup:
-            system_prompt += "\n\nQuesto è un followup a una conversazione precedente. Continua ad assistere l'utente con il problema già discusso."
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # Add conversation history if this is a followup
+        if is_followup and ticket_id:
+            session = SessionLocal()
+            try:
+                previous_messages = session.query(TicketMessage).filter(
+                    TicketMessage.ticket_id == ticket_id
+                ).order_by(TicketMessage.created_at).limit(10).all()
+
+                for msg in previous_messages[-6:]:  # Last 6 messages for context
+                    if msg.is_ai:
+                        messages.append({"role": "assistant", "content": msg.message})
+                    elif not msg.is_admin:
+                        messages.append({"role": "user", "content": msg.message})
+            finally:
+                session.close()
+
+        messages.append({"role": "user", "content": f"Problema: {problem_description}"})
 
         response = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Problema: {problem_description}"}
-            ],
+            messages=messages,
             max_tokens=400
         )
         ai_text = response.choices[0].message.content.strip()
@@ -918,7 +1042,7 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         session.add(user_message)
 
         # Try AI response first for the follow-up
-        ai_response = await get_ai_response(message_text, is_followup=True)
+        ai_response = await get_ai_response(message_text, is_followup=True, ticket_id=ticket_id)
         if ai_response:
             ai_message = TicketMessage(
                 ticket_id=ticket_id,
@@ -962,7 +1086,19 @@ async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
         if ticket:
             ticket.status = 'closed'
             session.commit()
-            await query.edit_message_text("✅ Ticket chiuso con successo!")
+
+            # Ask for feedback
+            feedback_keyboard = [
+                [InlineKeyboardButton("⭐⭐⭐⭐⭐ Eccellente", callback_data=f'feedback:{ticket_id}:5')],
+                [InlineKeyboardButton("⭐⭐⭐⭐ Buono", callback_data=f'feedback:{ticket_id}:4')],
+                [InlineKeyboardButton("⭐⭐⭐ Sufficiente", callback_data=f'feedback:{ticket_id}:3')],
+                [InlineKeyboardButton("⭐⭐ Scarso", callback_data=f'feedback:{ticket_id}:2')],
+                [InlineKeyboardButton("⭐ Molto Scarso", callback_data=f'feedback:{ticket_id}:1')],
+                [InlineKeyboardButton("⏭️ Salta Feedback", callback_data=f'feedback:{ticket_id}:0')]
+            ]
+            reply_markup = InlineKeyboardMarkup(feedback_keyboard)
+
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\n📝 **Valuta il supporto ricevuto:**\n\nCome valuti l'assistenza che hai ricevuto?", reply_markup=reply_markup, parse_mode='Markdown')
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -1646,8 +1782,94 @@ def main():
     # Re-add error handler to new application
     application.add_error_handler(error_handler)
 
+    # Quick commands
+    async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        session = SessionLocal()
+        try:
+            # User tickets
+            total_tickets = session.query(Ticket).filter(Ticket.user_id == user_id).count()
+            open_tickets = session.query(Ticket).filter(Ticket.user_id == user_id, Ticket.status.in_(['open', 'escalated'])).count()
+
+            # User notifications
+            notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).all()
+            active_notifications = len([n for n in notifications if session.query(List).filter(List.name == n.list_name, List.expiry_date > datetime.now(timezone.utc)).first()])
+
+            # Recent activity
+            recent_activities = session.query(UserActivity).filter(
+                UserActivity.user_id == user_id
+            ).order_by(UserActivity.timestamp.desc()).limit(3).all()
+
+            status_text = f"""
+📊 **Il Tuo Status Personale**
+
+🎫 **Ticket:**
+• Totali: {total_tickets}
+• Aperti: {open_tickets}
+
+🔔 **Notifiche Attive:** {active_notifications}
+
+📅 **Attività Recente:**
+"""
+
+            for activity in recent_activities:
+                time_ago = datetime.now(timezone.utc) - activity.timestamp
+                hours_ago = int(time_ago.total_seconds() / 3600)
+                status_text += f"• {activity.action} ({hours_ago}h fa)\n"
+
+            keyboard = [
+                [InlineKeyboardButton("🎫 I Miei Ticket", callback_data='my_tickets')],
+                [InlineKeyboardButton("📊 Dashboard Completo", callback_data='user_stats')],
+                [InlineKeyboardButton("⬅️ Menu Principale", callback_data='back_to_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+        finally:
+            session.close()
+
+    async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Alias for status command
+        await status_command(update, context)
+
+    async def renew_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        await update.message.reply_text("🔄 **Rinnovo Liste**\n\nInserisci il nome esatto della lista che vuoi rinnovare:", parse_mode='Markdown')
+        context.user_data['action'] = 'quick_renew'
+
+    async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        keyboard = [
+            [InlineKeyboardButton("📝 Apri Nuovo Ticket", callback_data='open_ticket')],
+            [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
+            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text("🎫 **Supporto Tecnico**\n\nCome possiamo aiutarti?", reply_markup=reply_markup, parse_mode='Markdown')
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("dashboard", dashboard_command))
+    application.add_handler(CommandHandler("renew", renew_command))
+    application.add_handler(CommandHandler("support", support_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
     application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals)$'))
@@ -1686,6 +1908,10 @@ def main():
 
     # Pianifica notifiche di scadenza ogni ora
     scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
+
+    # Enhanced backup scheduling - more frequent for better data safety
+    scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
+    scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
 
     # Start scheduler for notifications
     scheduler.start()
