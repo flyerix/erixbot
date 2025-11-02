@@ -1,47 +1,115 @@
-from bot import main
-import logging
-from flask import Flask
-import threading
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
+from datetime import datetime, timezone
 import os
 
-# Configure basic logging for main.py
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+DATABASE_URL = os.getenv('DATABASE_URL')
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Flask app for health checks
-app = Flask(__name__)
+Base = declarative_base()
 
-@app.route('/')
-def health_check():
-    """Health check endpoint for Render and external monitoring"""
-    return {
-        "status": "healthy",
-        "service": "ErixCast Bot",
-        "version": "1.0.0",
-        "uptime": "active"
-    }, 200
+class List(Base):
+    __tablename__ = 'lists'
 
-@app.route('/ping')
-def ping():
-    """Simple ping endpoint"""
-    return "pong", 200
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    cost = Column(String)
+    expiry_date = Column(DateTime)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-def run_flask():
-    """Run Flask server in a separate thread"""
-    port = int(os.environ.get('PORT', 10000))
-    logger.info(f"Starting Flask health check server on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+class Ticket(Base):
+    __tablename__ = 'tickets'
 
-if __name__ == '__main__':
-    try:
-        logger.info("🚀 Starting ErixCast Bot Application...")
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    title = Column(String)
+    description = Column(Text)
+    status = Column(String, default='open')  # open, closed, escalated
+    category = Column(String, default='generale')  # generale, tecnico, pagamento, altro
+    priority = Column(String, default='media')  # bassa, media, alta, critica
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    messages = relationship("TicketMessage", back_populates="ticket")
 
-        # Start Flask server in background thread
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
+class TicketMessage(Base):
+    __tablename__ = 'ticket_messages'
 
-        # Start the bot
-        main()
-    except Exception as e:
-        logger.critical(f"💥 Application crashed: {e}")
-        raise
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey('tickets.id'))
+    user_id = Column(Integer)
+    message = Column(Text)
+    is_admin = Column(Boolean, default=False)
+    is_ai = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    ticket = relationship("Ticket", back_populates="messages")
+
+class UserNotification(Base):
+    __tablename__ = 'user_notifications'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    list_name = Column(String)
+    days_before = Column(Integer)  # 1, 3, or 5 days before expiry
+
+class RenewalRequest(Base):
+    __tablename__ = 'renewal_requests'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    list_name = Column(String)
+    months = Column(Integer)
+    cost = Column(String)
+    status = Column(String, default='pending')  # pending, approved, rejected, contested
+    admin_notes = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime)
+    processed_by = Column(Integer)  # admin user_id who processed it
+
+class TicketFeedback(Base):
+    __tablename__ = 'ticket_feedbacks'
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey('tickets.id'))
+    user_id = Column(Integer, index=True)
+    rating = Column(Integer)  # 1-5 stars
+    comment = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class UserActivity(Base):
+    __tablename__ = 'user_activities'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    action = Column(String)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    details = Column(Text)
+
+class AuditLog(Base):
+    __tablename__ = 'audit_logs'
+
+    id = Column(Integer, primary_key=True, index=True)
+    admin_id = Column(Integer, index=True)
+    action = Column(String)  # create, update, delete, approve, reject, etc.
+    target_type = Column(String)  # list, ticket, renewal, user, etc.
+    target_id = Column(Integer)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    details = Column(Text)
+    ip_address = Column(String)
+    user_agent = Column(String)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class UserBehavior(Base):
+    __tablename__ = 'user_behaviors'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    behavior_type = Column(String)  # renewal_pattern, ticket_frequency, response_time, etc.
+    data = Column(Text)  # JSON data about the behavior
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+Base.metadata.create_all(bind=engine)
