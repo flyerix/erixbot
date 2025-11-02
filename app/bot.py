@@ -1787,6 +1787,16 @@ def main():
     time.sleep(startup_delay)
     logger.info("Starting bot...")
 
+    # Additional stability check - verify database connection before starting
+    try:
+        from models import SessionLocal
+        session = SessionLocal()
+        session.execute("SELECT 1")  # Simple query to test connection
+        session.close()
+        logger.info("✅ Database connection verified")
+    except Exception as db_e:
+        logger.warning(f"⚠️ Database connection issue: {db_e} - Bot will continue but some features may not work")
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add comprehensive error handler
@@ -2000,14 +2010,39 @@ def main():
     # Start scheduler for notifications
     scheduler.start()
 
-    # For 24/7 availability on free tier, implement heartbeat and keep-alive
+    # Enhanced keep-alive system for 24/7 availability
     import time
+    import requests
 
     def keep_alive():
         """Send periodic keep-alive signals to prevent Render from sleeping the service"""
+        port = int(os.environ.get('PORT', 10000))
+        render_url = os.environ.get('RENDER_URL', 'https://erixcastbot.onrender.com')
+
         while True:
-            logger.info("Bot is alive and running...")
-            time.sleep(300)  # Log every 5 minutes
+            try:
+                # Internal health check
+                response = requests.get(f"http://localhost:{port}/", timeout=10)
+                if response.status_code == 200:
+                    logger.info("✅ Internal health check passed")
+
+                    # External ping to keep Render active (if URL is configured)
+                    try:
+                        external_response = requests.get(f"{render_url}/ping", timeout=10)
+                        if external_response.status_code == 200:
+                            logger.info("🌐 External ping successful - Render service active")
+                        else:
+                            logger.warning(f"🌐 External ping failed with status {external_response.status_code}")
+                    except Exception as ext_e:
+                        logger.warning(f"🌐 External ping error: {ext_e}")
+
+                else:
+                    logger.warning(f"❌ Internal health check failed with status {response.status_code}")
+
+            except Exception as e:
+                logger.error(f"💥 Keep-alive error: {e}")
+
+            time.sleep(300)  # Check every 5 minutes
 
     # Start keep-alive thread
     import threading
