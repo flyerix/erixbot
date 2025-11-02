@@ -338,7 +338,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == 'admin_renewals':
         logger.info(f"Admin {user_id} accessed renewal requests")
-        await query.answer()  # Acknowledge the callback immediately
         try:
             session = SessionLocal()
             # Include both pending and contested renewals
