@@ -1237,19 +1237,40 @@ def main():
     # Start scheduler for notifications
     scheduler.start()
 
-    # For Render deployment, use polling with error recovery
+    # For 24/7 availability on free tier, implement heartbeat and keep-alive
+    import time
+
+    def keep_alive():
+        """Send periodic keep-alive signals to prevent Render from sleeping the service"""
+        while True:
+            logger.info("Bot is alive and running...")
+            time.sleep(300)  # Log every 5 minutes
+
+    # Start keep-alive thread
+    import threading
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
+
+    # Main bot loop with enhanced stability
     try:
-        logger.info("Starting bot polling...")
+        logger.info("🚀 Starting ErixCast Bot - 24/7 Service Active")
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,  # Ignore pending updates on startup
+            drop_pending_updates=True,
+            timeout=30,  # Shorter timeout for better responsiveness
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30
         )
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("🛑 Bot stopped by user")
     except Exception as e:
-        logger.error(f"Bot crashed with error: {e}")
-        # In production, you might want to implement restart logic here
-        raise  # Re-raise to let the deployment system handle it
+        logger.critical(f"💥 Bot crashed with critical error: {e}")
+        # Log critical error details
+        import traceback
+        logger.critical(f"Traceback: {traceback.format_exc()}")
+        raise  # Re-raise to trigger Render's restart policy
 
 if __name__ == '__main__':
     main()
