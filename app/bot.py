@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -273,6 +273,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton("📋 Gestisci Liste", callback_data='admin_lists')],
             [InlineKeyboardButton("🎫 Gestisci Ticket", callback_data='admin_tickets')],
+            [InlineKeyboardButton("🔄 Richieste Rinnovo", callback_data='admin_renewals')],
             [InlineKeyboardButton("📊 Statistiche", callback_data='admin_stats')],
             [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
         ]
@@ -332,6 +333,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error in user_stats for user {user_id}: {str(e)}")
             await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle statistiche. Riprova più tardi.")
+        finally:
+            session.close()
+
+    elif data == 'admin_renewals':
+        session = SessionLocal()
+        try:
+            renewals = session.query(RenewalRequest).filter(RenewalRequest.status == 'pending').all()
+            if not renewals:
+                keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text("🔄 **Richieste Rinnovo**\n\nNessuna richiesta di rinnovo in attesa.", reply_markup=reply_markup)
+                return
+
+            renewal_text = "🔄 **Richieste Rinnovo Pendenti:**\n\n"
+            keyboard = []
+            for renewal in renewals:
+                status_emoji = "⏳" if renewal.status == 'contested' else "⏸️"
+                renewal_text += f"{status_emoji} 📋 **{renewal.list_name}**\n👤 User: {renewal.user_id}\n⏰ {renewal.months} mesi - {renewal.cost}\n📅 {renewal.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+                keyboard.append([InlineKeyboardButton(f"🔍 Gestisci {renewal.list_name}", callback_data=f'manage_renewal:{renewal.id}')])
+
+            keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
         finally:
             session.close()
 
@@ -656,9 +680,52 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
     months = int(query.data.split(':')[1])
     list_name = context.user_data.get('renew_list')
     user_id = query.from_user.id
+    cost = months * 15
 
-    # Here we would send notification to admin - for now just confirm
-    await query.edit_message_text(f"✅ Richiesta di rinnovo inviata!\n\n📋 Lista: {list_name}\n⏰ Durata: {months} mesi\n👤 User ID: {user_id}\n\nGli admin riceveranno la notifica per l'approvazione. 🎉")
+    # Create renewal request in database
+    session = SessionLocal()
+    try:
+        renewal_request = RenewalRequest(
+            user_id=user_id,
+            list_name=list_name,
+            months=months,
+            cost=f"€{cost}"
+        )
+        session.add(renewal_request)
+        session.commit()
+
+        # Log the renewal request
+        log_user_action(user_id, "renewal_request_submitted", f"List: {list_name}, Months: {months}, Cost: €{cost}")
+
+        # Notify user
+        await query.edit_message_text(f"✅ Richiesta di rinnovo inviata!\n\n📋 Lista: {list_name}\n⏰ Durata: {months} mesi\n💰 Costo: €{cost}\n👤 User ID: {user_id}\n\nGli admin riceveranno la notifica per l'approvazione. 🎉")
+
+        # Notify all admins
+        admin_notification = f"""🚨 **Nuova Richiesta di Rinnovo**
+
+👤 **User ID:** {user_id}
+📋 **Lista:** {list_name}
+⏰ **Durata:** {months} mesi
+💰 **Costo:** €{cost}
+📅 **Data:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+🔍 Vai al pannello admin per gestire questa richiesta."""
+
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_notification,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify admin {admin_id}: {str(e)}")
+
+    except Exception as e:
+        logger.error(f"Error creating renewal request for user {user_id}: {str(e)}")
+        await query.edit_message_text("❌ Si è verificato un errore nell'invio della richiesta. Riprova più tardi.")
+    finally:
+        session.close()
 
     context.user_data.pop('renew_list', None)
     context.user_data.pop('renew_months', None)
@@ -809,7 +876,7 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Extract ticket ID from the replied message text
     import re
-    ticket_match = re.search(r'Ticket #(\d+)', replied_message.text or "")
+    ticket_match = re.search(r'ticket #(\d+)', (replied_message.text or "").lower())
     if not ticket_match:
         await update.message.reply_text("❌ Non riesco a identificare il ticket a cui stai rispondendo.")
         return
@@ -1222,7 +1289,7 @@ async def handle_admin_contact_message(update: Update, context: ContextTypes.DEF
 {message_text}
 
 ---
-📞 Puoi rispondere a questo messaggio per continuare la conversazione."""
+📞 Puoi rispondere a questo messaggio per continuare la conversazione con il ticket #{ticket_id}."""
 
         await context.bot.send_message(
             chat_id=user_id,
@@ -1262,6 +1329,206 @@ async def handle_admin_contact_message(update: Update, context: ContextTypes.DEF
         # Log failed contact
         log_admin_action(admin_id, "contact_user_failed", user_id, f"Ticket: {ticket_id}, Error: {str(e)}")
 
+async def manage_renewal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    renewal_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        renewal = session.query(RenewalRequest).filter(RenewalRequest.id == renewal_id).first()
+        if not renewal:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        renewal_text = f"""🔄 **Richiesta Rinnovo #{renewal.id}**
+
+📋 **Lista:** {renewal.list_name}
+👤 **User ID:** {renewal.user_id}
+⏰ **Durata:** {renewal.months} mesi
+💰 **Costo:** {renewal.cost}
+📅 **Data richiesta:** {renewal.created_at.strftime('%d/%m/%Y %H:%M')}
+
+Cosa vuoi fare con questa richiesta?
+"""
+
+        keyboard = [
+            [InlineKeyboardButton("✅ Approva", callback_data=f'approve_renewal:{renewal.id}')],
+            [InlineKeyboardButton("❌ Rifiuta", callback_data=f'reject_renewal:{renewal.id}')],
+            [InlineKeyboardButton("⏳ Contesta", callback_data=f'contest_renewal:{renewal.id}')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_renewals')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
+    finally:
+        session.close()
+
+async def approve_renewal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    renewal_id = int(query.data.split(':')[1])
+    admin_id = query.from_user.id
+
+    if not is_admin(admin_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        renewal = session.query(RenewalRequest).filter(RenewalRequest.id == renewal_id).first()
+        if not renewal:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Update list expiry date
+        lst = session.query(List).filter(List.name == renewal.list_name).first()
+        if lst:
+            current_expiry = lst.expiry_date or datetime.now(timezone.utc)
+            new_expiry = current_expiry + timedelta(days=renewal.months * 30)  # Approximate months to days
+            lst.expiry_date = new_expiry
+
+        # Mark renewal as approved
+        renewal.status = 'approved'
+
+        session.commit()
+
+        # Notify user
+        try:
+            approval_message = f"""✅ **Richiesta di Rinnovo Approvata!**
+
+📋 **Lista:** {renewal.list_name}
+⏰ **Durata:** {renewal.months} mesi
+💰 **Costo:** {renewal.cost}
+📅 **Nuova scadenza:** {new_expiry.strftime('%d/%m/%Y') if lst else 'N/A'}
+
+Il rinnovo è stato elaborato con successo! 🎉"""
+
+            await context.bot.send_message(
+                chat_id=renewal.user_id,
+                text=approval_message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {renewal.user_id} about renewal approval: {str(e)}")
+
+        await query.edit_message_text(f"✅ Richiesta di rinnovo #{renewal_id} approvata con successo!")
+
+        # Log admin action
+        log_admin_action(admin_id, "renewal_approved", renewal.user_id, f"List: {renewal.list_name}, Months: {renewal.months}")
+
+    except Exception as e:
+        logger.error(f"Error approving renewal {renewal_id}: {str(e)}")
+        await query.edit_message_text("❌ Si è verificato un errore nell'approvazione. Riprova più tardi.")
+    finally:
+        session.close()
+
+async def contest_renewal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    renewal_id = int(query.data.split(':')[1])
+    admin_id = query.from_user.id
+
+    if not is_admin(admin_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        renewal = session.query(RenewalRequest).filter(RenewalRequest.id == renewal_id).first()
+        if not renewal:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Mark renewal as contested (under review)
+        renewal.status = 'contested'
+        session.commit()
+
+        # Notify user about contestation
+        try:
+            contest_message = f"""⏳ **Richiesta di Rinnovo in Revisione**
+
+📋 **Lista:** {renewal.list_name}
+⏰ **Durata richiesta:** {renewal.months} mesi
+💰 **Costo:** {renewal.cost}
+
+La tua richiesta di rinnovo è stata messa sotto revisione. Un amministratore ti contatterà presto per chiarimenti o conferma.
+
+📞 Puoi rispondere a questo messaggio per fornire ulteriori dettagli."""
+
+            await context.bot.send_message(
+                chat_id=renewal.user_id,
+                text=contest_message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {renewal.user_id} about renewal contestation: {str(e)}")
+
+        await query.edit_message_text(f"⏳ Richiesta di rinnovo #{renewal_id} messa sotto revisione.\n\nL'utente è stato notificato e può essere contattato per chiarimenti.")
+
+        # Log admin action
+        log_admin_action(admin_id, "renewal_contested", renewal.user_id, f"List: {renewal.list_name}, Months: {renewal.months}")
+
+    except Exception as e:
+        logger.error(f"Error contesting renewal {renewal_id}: {str(e)}")
+        await query.edit_message_text("❌ Si è verificato un errore nella contestazione. Riprova più tardi.")
+    finally:
+        session.close()
+
+async def reject_renewal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    renewal_id = int(query.data.split(':')[1])
+    admin_id = query.from_user.id
+
+    if not is_admin(admin_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        renewal = session.query(RenewalRequest).filter(RenewalRequest.id == renewal_id).first()
+        if not renewal:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Mark renewal as rejected
+        renewal.status = 'rejected'
+        session.commit()
+
+        # Notify user
+        try:
+            rejection_message = f"""❌ **Richiesta di Rinnovo Rifiutata**
+
+📋 **Lista:** {renewal.list_name}
+⏰ **Durata richiesta:** {renewal.months} mesi
+💰 **Costo:** {renewal.cost}
+
+La tua richiesta di rinnovo è stata rifiutata. Contatta l'assistenza per maggiori dettagli."""
+
+            await context.bot.send_message(
+                chat_id=renewal.user_id,
+                text=rejection_message,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {renewal.user_id} about renewal rejection: {str(e)}")
+
+        await query.edit_message_text(f"❌ Richiesta di rinnovo #{renewal_id} rifiutata.")
+
+        # Log admin action
+        log_admin_action(admin_id, "renewal_rejected", renewal.user_id, f"List: {renewal.list_name}, Months: {renewal.months}")
+
+    except Exception as e:
+        logger.error(f"Error rejecting renewal {renewal_id}: {str(e)}")
+        await query.edit_message_text("❌ Si è verificato un errore nel rifiuto. Riprova più tardi.")
+    finally:
+        session.close()
+
 async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1277,6 +1544,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         total_tickets = session.query(Ticket).count()
         open_tickets = session.query(Ticket).filter(Ticket.status == 'open').count()
         closed_tickets = session.query(Ticket).filter(Ticket.status == 'closed').count()
+        pending_renewals = session.query(RenewalRequest).filter(RenewalRequest.status == 'pending').count()
 
         stats_text = f"""
 📊 **Statistiche del Bot**
@@ -1285,6 +1553,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 🎫 **Ticket Totali:** {total_tickets}
 🟢 **Ticket Aperti:** {open_tickets}
 🔴 **Ticket Chiusi:** {closed_tickets}
+🔄 **Rinnovi in Attesa:** {pending_renewals}
 """
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
@@ -1378,6 +1647,10 @@ def main():
     application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
     application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern='^admin_stats$'))
+    application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
+    application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
+    application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
+    application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
 
     # Pianifica backup automatico giornaliero
     scheduler.add_job(create_backup, CronTrigger(hour=2, minute=0))  # Ogni giorno alle 2:00
