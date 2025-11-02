@@ -8,6 +8,10 @@ services:
     healthCheckPath: /
     restartPolicy: on_failure
     autoDeploy: true
+    # Enhanced configuration for 24/7 availability
+    maxShutdownDelaySeconds: 30
+    healthCheckTimeout: 30
+    # Environment variables for uptime monitoring
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         fromSecret: telegram_bot_token
@@ -21,3 +25,7 @@ services:
         value: 10000
       - key: WEBHOOK_URL
         fromSecret: webhook_url
+      - key: RENDER_URL
+        fromSecret: render_url
+      - key: STARTUP_DELAY
+        value: 60
