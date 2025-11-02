@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import signal
+import sys
 
 load_dotenv()
 
@@ -27,6 +29,49 @@ logger = logging.getLogger(__name__)
 # Directory per backup
 BACKUP_DIR = 'backups'
 os.makedirs(BACKUP_DIR, exist_ok=True)
+
+# PID file management for preventing multiple instances
+PID_FILE = 'bot.pid'
+
+def create_pid_file():
+    """Create a PID file to prevent multiple instances"""
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            # Check if process is still running
+            try:
+                os.kill(old_pid, 0)  # Signal 0 just checks if process exists
+                logger.critical(f"❌ Another bot instance is already running (PID: {old_pid})")
+                logger.critical("Please stop the existing instance before starting a new one")
+                sys.exit(1)
+            except OSError:
+                # Process is not running, remove stale PID file
+                logger.warning(f"Removing stale PID file for dead process {old_pid}")
+                os.remove(PID_FILE)
+        except (ValueError, FileNotFoundError):
+            # Invalid PID file, remove it
+            os.remove(PID_FILE)
+
+    # Create new PID file
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+    logger.info(f"✅ PID file created: {PID_FILE} (PID: {os.getpid()})")
+
+def remove_pid_file():
+    """Remove the PID file on shutdown"""
+    try:
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+            logger.info("✅ PID file removed")
+    except Exception as e:
+        logger.error(f"❌ Error removing PID file: {e}")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
+    remove_pid_file()
+    sys.exit(0)
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -1824,6 +1869,13 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         session.close()
 
 def main():
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Create PID file to prevent multiple instances
+    create_pid_file()
+
     # Add startup delay to allow previous instance to shut down gracefully
     import time
     startup_delay = int(os.getenv('STARTUP_DELAY', '60'))  # Increased to 60 seconds for better stability
@@ -1869,6 +1921,10 @@ def main():
                 if hasattr(application, 'stop'):
                     loop.create_task(application.stop())
                 logger.critical("Application stop initiated...")
+
+                # Clean up PID file immediately
+                remove_pid_file()
+
             except Exception as shutdown_error:
                 logger.critical(f"Error during shutdown: {shutdown_error}")
 
@@ -2141,11 +2197,13 @@ def main():
         )
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
+        remove_pid_file()
     except Exception as e:
         logger.critical(f"💥 Bot crashed with critical error: {e}")
         # Log critical error details
         import traceback
         logger.critical(f"Traceback: {traceback.format_exc()}")
+        remove_pid_file()
         raise  # Re-raise to trigger Render's restart policy
 
 if __name__ == '__main__':
