@@ -1139,6 +1139,71 @@ async def admin_lists_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     finally:
         session.close()
 
+async def cleanup_closed_tickets():
+    """Elimina automaticamente i ticket chiusi dopo 12 ore"""
+    try:
+        session = SessionLocal()
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=12)
+
+        # Trova ticket chiusi più vecchi di 12 ore
+        old_closed_tickets = session.query(Ticket).filter(
+            Ticket.status == 'closed',
+            Ticket.updated_at < cutoff_time
+        ).all()
+
+        deleted_count = 0
+        for ticket in old_closed_tickets:
+            # Elimina anche messaggi e feedback associati
+            session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket.id).delete()
+            session.query(TicketFeedback).filter(TicketFeedback.ticket_id == ticket.id).delete()
+            session.delete(ticket)
+            deleted_count += 1
+
+        session.commit()
+        logger.info(f"CLEANUP_COMPLETED - Deleted {deleted_count} closed tickets older than 12 hours")
+
+    except Exception as e:
+        logger.error(f"CLEANUP_ERROR - {str(e)}")
+    finally:
+        session.close()
+
+async def sync_user_counters():
+    """Sincronizza e pulisce i contatori degli utenti per garantire coerenza"""
+    try:
+        session = SessionLocal()
+
+        # Rimuovi notifiche per liste che non esistono più
+        orphaned_notifications = session.query(UserNotification).filter(
+            ~UserNotification.list_name.in_(
+                session.query(List.name).subquery()
+            )
+        ).all()
+
+        for notif in orphaned_notifications:
+            session.delete(notif)
+            logger.info(f"SYNC_CLEANUP - Removed orphaned notification for user {notif.user_id}, list {notif.list_name}")
+
+        # Rimuovi notifiche per liste scadute da più di 30 giorni
+        expired_notifications = session.query(UserNotification).filter(
+            UserNotification.list_name.in_(
+                session.query(List.name).filter(
+                    List.expiry_date < datetime.now(timezone.utc) - timedelta(days=30)
+                )
+            )
+        ).all()
+
+        for notif in expired_notifications:
+            session.delete(notif)
+            logger.info(f"SYNC_CLEANUP - Removed expired notification for user {notif.user_id}, list {notif.list_name}")
+
+        session.commit()
+        logger.info("SYNC_COMPLETED - User counters synchronized")
+
+    except Exception as e:
+        logger.error(f"SYNC_ERROR - {str(e)}")
+    finally:
+        session.close()
+
 async def create_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1925,6 +1990,12 @@ def main():
     # Enhanced backup scheduling - more frequent for better data safety
     scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
     scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
+
+    # Pianifica pulizia automatica dei ticket chiusi dopo 12 ore
+    scheduler.add_job(cleanup_closed_tickets, CronTrigger(hour=3, minute=0))  # Ogni giorno alle 3:00
+
+    # Pianifica sincronizzazione contatori ogni 30 minuti
+    scheduler.add_job(sync_user_counters, CronTrigger(minute='*/30'))  # Ogni 30 minuti
 
     # Start scheduler for notifications
     scheduler.start()
