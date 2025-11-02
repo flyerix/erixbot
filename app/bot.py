@@ -1631,7 +1631,6 @@ def main():
 
     # Add persistence to maintain state across restarts
     from telegram.ext import PicklePersistence
-    import os
 
     # Create persistence directory if it doesn't exist
     persistence_file = 'bot_persistence'
