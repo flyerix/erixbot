@@ -352,12 +352,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for renewal in renewals:
                 status_emoji = "⏳" if renewal.status == 'contested' else "⏸️"
                 status_text = "In Revisione" if renewal.status == 'contested' else "In Attesa"
-                renewal_text += f"{status_emoji} 📋 **{renewal.list_name}**\n👤 User: {renewal.user_id}\n⏰ {renewal.months} mesi - {renewal.cost}\n📊 Stato: {status_text}\n {renewal.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+                renewal_text += f"{status_emoji} 📋 **{renewal.list_name}**\n👤 User: {renewal.user_id}\n⏰ {renewal.months} mesi - {renewal.cost}\n📊 Stato: {status_text}\n📅 {renewal.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
                 keyboard.append([InlineKeyboardButton(f"🔍 Gestisci {renewal.list_name}", callback_data=f'manage_renewal:{renewal.id}')])
 
             keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except Exception as e:
+            logger.error(f"Error in admin_renewals for admin {user_id}: {str(e)}")
+            await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle richieste di rinnovo. Riprova più tardi.")
         finally:
             session.close()
 
