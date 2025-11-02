@@ -2080,24 +2080,26 @@ def main():
 
         # Test bot connectivity and clear any existing webhooks
         try:
-            # Delete any existing webhook first
+            # Delete any existing webhook first (synchronous call)
             logger.info("🧹 Deleting any existing webhooks...")
-            await application.bot.delete_webhook(drop_pending_updates=True)
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(application.bot.delete_webhook(drop_pending_updates=True))
             logger.info("✅ Webhook deleted successfully")
 
             # Test bot connectivity
-            bot_info = await application.bot.get_me()
+            bot_info = loop.run_until_complete(application.bot.get_me())
             logger.info(f"✅ Bot connected successfully as @{bot_info.username} (ID: {bot_info.id})")
 
             # Verify bot can receive messages (send a test message to admin if configured)
             if ADMIN_IDS:
                 try:
                     test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')
-                    await application.bot.send_message(
+                    loop.run_until_complete(application.bot.send_message(
                         chat_id=ADMIN_IDS[0],
                         text=test_message,
                         parse_mode='Markdown'
-                    )
+                    ))
                     logger.info(f"✅ Test message sent to admin {ADMIN_IDS[0]}")
                 except Exception as msg_e:
                     logger.warning(f"⚠️ Could not send test message to admin: {msg_e}")
