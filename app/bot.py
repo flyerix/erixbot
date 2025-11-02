@@ -33,6 +33,21 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
+# Validate required environment variables
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("❌ TELEGRAM_BOT_TOKEN is required but not set")
+    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
+
+if not OPENAI_API_KEY:
+    logger.error("❌ OPENAI_API_KEY is required but not set")
+    raise ValueError("OPENAI_API_KEY environment variable is required")
+
+if not ADMIN_IDS:
+    logger.error("❌ ADMIN_IDS is required but not set")
+    raise ValueError("ADMIN_IDS environment variable is required")
+
+logger.info("✅ Environment variables validated successfully")
+
 # Rate limiting
 user_action_counts = {}
 RATE_LIMIT_WINDOW = 60  # seconds
@@ -1789,13 +1804,15 @@ def main():
 
     # Additional stability check - verify database connection before starting
     try:
-        from models import SessionLocal
-        session = SessionLocal()
-        session.execute("SELECT 1")  # Simple query to test connection
-        session.close()
+        from models import SessionLocal, engine
+        # Test database connection
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
         logger.info("✅ Database connection verified")
     except Exception as db_e:
-        logger.warning(f"⚠️ Database connection issue: {db_e} - Bot will continue but some features may not work")
+        logger.error(f"💥 Database connection failed: {db_e}")
+        logger.error("Bot cannot start without database connection")
+        raise  # Exit if database is not available
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
