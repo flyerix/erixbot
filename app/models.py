@@ -67,4 +67,23 @@ class RenewalRequest(Base):
     processed_at = Column(DateTime)
     processed_by = Column(Integer)  # admin user_id who processed it
 
+class TicketFeedback(Base):
+    __tablename__ = 'ticket_feedbacks'
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey('tickets.id'))
+    user_id = Column(Integer, index=True)
+    rating = Column(Integer)  # 1-5 stars
+    comment = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class UserActivity(Base):
+    __tablename__ = 'user_activities'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    action = Column(String)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    details = Column(Text)
+
 Base.metadata.create_all(bind=engine)
