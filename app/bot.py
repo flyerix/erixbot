@@ -339,7 +339,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'admin_renewals':
         session = SessionLocal()
         try:
-            renewals = session.query(RenewalRequest).filter(RenewalRequest.status == 'pending').all()
+            # Include both pending and contested renewals
+            renewals = session.query(RenewalRequest).filter(RenewalRequest.status.in_(['pending', 'contested'])).all()
             if not renewals:
                 keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -350,7 +351,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = []
             for renewal in renewals:
                 status_emoji = "⏳" if renewal.status == 'contested' else "⏸️"
-                renewal_text += f"{status_emoji} 📋 **{renewal.list_name}**\n👤 User: {renewal.user_id}\n⏰ {renewal.months} mesi - {renewal.cost}\n📅 {renewal.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+                status_text = "In Revisione" if renewal.status == 'contested' else "In Attesa"
+                renewal_text += f"{status_emoji} 📋 **{renewal.list_name}**\n👤 User: {renewal.user_id}\n⏰ {renewal.months} mesi - {renewal.cost}\n📊 Stato: {status_text}\n {renewal.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
                 keyboard.append([InlineKeyboardButton(f"🔍 Gestisci {renewal.list_name}", callback_data=f'manage_renewal:{renewal.id}')])
 
             keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
