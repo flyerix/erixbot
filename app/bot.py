@@ -1146,18 +1146,32 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add error handler for Conflict errors
+    # Add comprehensive error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Log the error and send a telegram message to notify the developer."""
+        """Log the error and handle gracefully."""
         logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
         # Check if it's a Conflict error (multiple bot instances)
         if isinstance(context.error, telegram.error.Conflict):
             logger.critical("Conflict error detected - Multiple bot instances running!")
-            # You might want to send a notification to admin here
             return
 
-        # For other errors, you might want to send a message to the user
+        # Check for NetworkError (connection issues)
+        if isinstance(context.error, telegram.error.NetworkError):
+            logger.warning(f"Network error: {context.error}")
+            return
+
+        # Check for RetryAfter (rate limiting)
+        if isinstance(context.error, telegram.error.RetryAfter):
+            logger.warning(f"Rate limited, retry after {context.error.retry_after} seconds")
+            return
+
+        # Check for TimedOut (timeout issues)
+        if isinstance(context.error, telegram.error.TimedOut):
+            logger.warning("Request timed out")
+            return
+
+        # For other errors, try to notify the user
         if update and hasattr(update, 'effective_chat'):
             try:
                 await context.bot.send_message(
@@ -1168,6 +1182,20 @@ def main():
                 logger.error(f"Failed to send error message to user: {e}")
 
     # Add error handler
+    application.add_error_handler(error_handler)
+
+    # Add persistence to maintain state across restarts
+    from telegram.ext import PicklePersistence
+    import os
+
+    # Create persistence directory if it doesn't exist
+    persistence_file = 'bot_persistence'
+    persistence = PicklePersistence(filepath=persistence_file)
+
+    # Rebuild application with persistence
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).persistence(persistence).build()
+
+    # Re-add error handler to new application
     application.add_error_handler(error_handler)
 
     application.add_handler(CommandHandler("start", start))
@@ -1209,8 +1237,19 @@ def main():
     # Start scheduler for notifications
     scheduler.start()
 
-    # For Render deployment, use polling (webhook requires additional dependencies)
-    application.run_polling()
+    # For Render deployment, use polling with error recovery
+    try:
+        logger.info("Starting bot polling...")
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,  # Ignore pending updates on startup
+        )
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed with error: {e}")
+        # In production, you might want to implement restart logic here
+        raise  # Re-raise to let the deployment system handle it
 
 if __name__ == '__main__':
     main()
