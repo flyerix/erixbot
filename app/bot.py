@@ -1717,7 +1717,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     # Add startup delay to allow previous instance to shut down gracefully
     import time
-    startup_delay = int(os.getenv('STARTUP_DELAY', '30'))  # Default 30 seconds
+    startup_delay = int(os.getenv('STARTUP_DELAY', '60'))  # Increased to 60 seconds for better stability
     logger.info(f"Waiting {startup_delay} seconds for previous instance to shut down...")
     time.sleep(startup_delay)
     logger.info("Starting bot...")
@@ -1732,14 +1732,27 @@ def main():
         # Check if it's a Conflict error (multiple bot instances)
         if isinstance(context.error, telegram.error.Conflict):
             logger.critical("Conflict error detected - Multiple bot instances running!")
-            logger.critical("Terminating this bot instance to prevent conflicts...")
-            # Force immediate shutdown
-            import asyncio
-            import sys
-            # Stop the event loop and exit
-            loop = asyncio.get_event_loop()
-            loop.stop()
-            sys.exit(1)  # Exit with error code to trigger restart policy
+            logger.critical("This could be due to:")
+            logger.critical("1. Another bot instance running elsewhere")
+            logger.critical("2. Previous instance didn't shut down properly")
+            logger.critical("3. Webhook mode conflict with polling mode")
+            logger.critical("4. Bot token being used by another application")
+
+            # For Conflict errors, we need to stop polling immediately
+            # The error will cause the application to restart via Render's policy
+            logger.critical("Stopping polling due to conflict - Render will restart the service")
+            try:
+                # Stop the application immediately
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if hasattr(application, 'stop'):
+                    loop.create_task(application.stop())
+                logger.critical("Application stop initiated...")
+            except Exception as shutdown_error:
+                logger.critical(f"Error during shutdown: {shutdown_error}")
+
+            # Re-raise the exception to trigger Render's restart policy
+            raise context.error
 
         # Check for NetworkError (connection issues)
         if isinstance(context.error, telegram.error.NetworkError):
@@ -1936,11 +1949,11 @@ def main():
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
-            timeout=30,  # Shorter timeout for better responsiveness
-            read_timeout=30,
-            write_timeout=30,
-            connect_timeout=30,
-            pool_timeout=30
+            timeout=60,  # Increased timeout for better stability
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+            pool_timeout=60
         )
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
