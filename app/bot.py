@@ -337,10 +337,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session.close()
 
     elif data == 'admin_renewals':
-        session = SessionLocal()
+        logger.info(f"Admin {user_id} accessed renewal requests")
+        await query.answer()  # Acknowledge the callback immediately
         try:
+            session = SessionLocal()
             # Include both pending and contested renewals
             renewals = session.query(RenewalRequest).filter(RenewalRequest.status.in_(['pending', 'contested'])).all()
+            logger.info(f"Found {len(renewals)} renewal requests")
+
             if not renewals:
                 keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -358,11 +362,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
+            logger.info(f"Successfully displayed {len(renewals)} renewal requests to admin {user_id}")
         except Exception as e:
             logger.error(f"Error in admin_renewals for admin {user_id}: {str(e)}")
-            await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle richieste di rinnovo. Riprova più tardi.")
+            logger.error(f"Full traceback:", exc_info=True)
+            try:
+                await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle richieste di rinnovo. Riprova più tardi.")
+            except Exception as inner_e:
+                logger.error(f"Failed to send error message to admin {user_id}: {str(inner_e)}")
         finally:
-            session.close()
+            try:
+                session.close()
+            except:
+                pass
 
     elif data == 'help':
         help_text = """
