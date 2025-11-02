@@ -394,6 +394,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text
     action = context.user_data.get('action')
 
+    # Check if this is a reply to a ticket
+    if update.message.reply_to_message and not action:
+        # This is a reply to a ticket message
+        await handle_ticket_reply(update, context)
+        return
+
     if action == 'search_list':
         session = SessionLocal()
         try:
@@ -791,6 +797,76 @@ async def reply_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['reply_ticket'] = ticket_id
     await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
 
+async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle replies to ticket messages"""
+    user_id = update.effective_user.id
+    message_text = update.message.text
+
+    # Find the ticket this reply belongs to by checking the replied message
+    replied_message = update.message.reply_to_message
+    if not replied_message:
+        return
+
+    # Extract ticket ID from the replied message text
+    import re
+    ticket_match = re.search(r'Ticket #(\d+)', replied_message.text or "")
+    if not ticket_match:
+        await update.message.reply_text("❌ Non riesco a identificare il ticket a cui stai rispondendo.")
+        return
+
+    ticket_id = int(ticket_match.group(1))
+
+    session = SessionLocal()
+    try:
+        # Verify the ticket belongs to this user
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if not ticket:
+            await update.message.reply_text("❌ Ticket non trovato o non autorizzato.")
+            return
+
+        # Add the user reply to the ticket
+        user_message = TicketMessage(
+            ticket_id=ticket_id,
+            user_id=user_id,
+            message=message_text,
+            is_admin=False,
+            is_ai=False
+        )
+        session.add(user_message)
+
+        # Try AI response first for the follow-up
+        ai_response = await get_ai_response(message_text, is_followup=True)
+        if ai_response:
+            ai_message = TicketMessage(
+                ticket_id=ticket_id,
+                user_id=0,
+                message=ai_response,
+                is_admin=False,
+                is_ai=True
+            )
+            session.add(ai_message)
+            session.commit()
+
+            await update.message.reply_text(f"💬 **Risposta aggiunta al ticket #{ticket_id}!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\nSe hai ancora bisogno di aiuto, puoi rispondere a questo messaggio!")
+
+            # Log follow-up
+            log_ticket_event(ticket_id, "user_followup_with_ai", user_id, f"AI Response: {len(ai_response)} chars")
+        else:
+            # Escalate to admin
+            ticket.status = 'escalated'
+            session.commit()
+
+            await update.message.reply_text(f"💬 **Risposta aggiunta al ticket #{ticket_id}!**\n\nIl tuo problema richiede assistenza umana. Un admin ti contatterà presto! 👨‍💼")
+
+            # Log escalation
+            log_ticket_event(ticket_id, "user_followup_escalated", user_id, "AI could not resolve follow-up")
+
+    except Exception as e:
+        logger.error(f"Error handling ticket reply for user {user_id}: {str(e)}")
+        await update.message.reply_text("❌ Si è verificato un errore nell'invio della risposta. Riprova più tardi.")
+    finally:
+        session.close()
+
 async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1094,23 +1170,97 @@ async def admin_contact_user_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
     ticket_id = int(query.data.split(':')[1])
-    user_id = query.from_user.id
+    admin_id = query.from_user.id
 
-    if not is_admin(user_id):
+    if not is_admin(admin_id):
         await query.edit_message_text("❌ Accesso negato!")
         return
 
     session = SessionLocal()
     try:
         ticket = session.query(Ticket).filter(Ticket.id == ticket_id).first()
-        if ticket:
-            # Here we would implement direct messaging to user
-            # For now, just show user info
-            await query.edit_message_text(f"📞 Contatto diretto con user {ticket.user_id} per ticket #{ticket_id}\n\nQuesta funzionalità sarà implementata per permettere il contatto diretto.")
-        else:
+        if not ticket:
             await query.edit_message_text("❌ Ticket non trovato.")
+            return
+
+        # Set up direct messaging context
+        context.user_data['contact_user_ticket'] = ticket_id
+        context.user_data['contact_user_id'] = ticket.user_id
+
+        await query.edit_message_text(f"📞 **Contatto diretto con User {ticket.user_id}**\n\nScrivi il messaggio che vuoi inviare all'utente per il ticket #{ticket_id}.\n\nIl messaggio verrà inviato direttamente alla chat privata dell'utente.")
+
+        # Log admin action
+        log_admin_action(admin_id, "initiate_user_contact", ticket.user_id, f"Ticket: {ticket_id}")
+
+    except Exception as e:
+        logger.error(f"Error in admin_contact_user for admin {admin_id}: {str(e)}")
+        await query.edit_message_text("❌ Si è verificato un errore. Riprova più tardi.")
     finally:
         session.close()
+
+async def handle_admin_contact_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin messages to contact users"""
+    admin_id = update.effective_user.id
+    message_text = update.message.text
+
+    if not is_admin(admin_id):
+        return
+
+    # Check if admin is in contact mode
+    ticket_id = context.user_data.get('contact_user_ticket')
+    user_id = context.user_data.get('contact_user_id')
+
+    if not ticket_id or not user_id:
+        return
+
+    try:
+        # Send message to user
+        contact_message = f"""👨‍💼 **Messaggio dall'Assistenza Tecnica**
+
+💬 **Riguardo al tuo ticket #{ticket_id}:**
+
+{message_text}
+
+---
+📞 Puoi rispondere a questo messaggio per continuare la conversazione."""
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=contact_message,
+            parse_mode='Markdown'
+        )
+
+        # Add admin message to ticket
+        session = SessionLocal()
+        try:
+            admin_message = TicketMessage(
+                ticket_id=ticket_id,
+                user_id=admin_id,
+                message=message_text,
+                is_admin=True,
+                is_ai=False
+            )
+            session.add(admin_message)
+            session.commit()
+
+            await update.message.reply_text(f"✅ Messaggio inviato con successo all'utente {user_id} per il ticket #{ticket_id}")
+
+            # Log successful contact
+            log_admin_action(admin_id, "contact_user_success", user_id, f"Ticket: {ticket_id}, Message: {len(message_text)} chars")
+
+        finally:
+            session.close()
+
+        # Clear contact context
+        context.user_data.pop('contact_user_ticket', None)
+        context.user_data.pop('contact_user_id', None)
+
+    except Exception as e:
+        logger.error(f"Error sending contact message from admin {admin_id} to user {user_id}: {str(e)}")
+        await update.message.reply_text("❌ Errore nell'invio del messaggio. L'utente potrebbe aver bloccato il bot.")
+
+        # Log failed contact
+        log_admin_action(admin_id, "contact_user_failed", user_id, f"Ticket: {ticket_id}, Error: {str(e)}")
 
 async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1201,6 +1351,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
     application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
