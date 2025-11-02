@@ -35,6 +35,7 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # PID file management for preventing multiple instances
 PID_FILE = 'bot.pid'
+LOCK_FILE = 'bot.lock'
 
 def create_pid_file():
     """Create a PID file to prevent multiple instances"""
@@ -69,6 +70,82 @@ def remove_pid_file():
             logger.info("✅ PID file removed")
     except Exception as e:
         logger.error(f"❌ Error removing PID file: {e}")
+
+def create_lock_file():
+    """Crea un lock file con timestamp per prevenire avvii rapidi"""
+    now = datetime.now(timezone.utc).timestamp()
+
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                lock_time = float(f.read().strip())
+            # Se il lock è più vecchio di 5 minuti, rimuovilo
+            if now - lock_time > 300:  # 5 minuti
+                logger.warning(f"Removing stale lock file (age: {now - lock_time:.0f}s)")
+                os.remove(LOCK_FILE)
+            else:
+                logger.critical(f"❌ Lock file attivo - servizio in fase di avvio/shutdown (tempo rimanente: {300 - (now - lock_time):.0f}s)")
+                sys.exit(1)
+        except (ValueError, FileNotFoundError):
+            # File corrotto, rimuovilo
+            os.remove(LOCK_FILE)
+
+    # Crea nuovo lock file
+    with open(LOCK_FILE, 'w') as f:
+        f.write(str(now))
+    logger.info(f"✅ Lock file creato: {LOCK_FILE}")
+
+def remove_lock_file():
+    """Remove the lock file"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            logger.info("✅ Lock file removed")
+    except Exception as e:
+        logger.error(f"❌ Error removing lock file: {e}")
+
+class CircuitBreaker:
+    """Circuit breaker per prevenire riavvii troppo frequenti"""
+    def __init__(self, failure_threshold=3, recovery_timeout=600):  # 10 minuti
+        self.failure_count = 0
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.last_failure_time = None
+        self.state = 'CLOSED'  # CLOSED, OPEN, HALF_OPEN
+
+    def can_proceed(self):
+        now = datetime.now(timezone.utc).timestamp()
+
+        if self.state == 'CLOSED':
+            return True
+        elif self.state == 'OPEN':
+            if self.last_failure_time and now - self.last_failure_time > self.recovery_timeout:
+                self.state = 'HALF_OPEN'
+                logger.info("🔄 Circuit breaker: HALF_OPEN - tentativo di recovery")
+                return True
+            logger.warning(f"🚫 Circuit breaker: OPEN - rifiuto avvio (tempo rimanente: {self.recovery_timeout - (now - self.last_failure_time):.0f}s)")
+            return False
+        elif self.state == 'HALF_OPEN':
+            return True
+
+        return False
+
+    def record_success(self):
+        if self.state == 'HALF_OPEN':
+            self.state = 'CLOSED'
+            self.failure_count = 0
+            logger.info("✅ Circuit breaker: CLOSED - recovery completato")
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = datetime.now(timezone.utc).timestamp()
+
+        if self.failure_count >= self.failure_threshold:
+            self.state = 'OPEN'
+            logger.critical(f"💥 Circuit breaker: OPEN - troppi fallimenti ({self.failure_count}/{self.failure_threshold})")
+
+# Istanza globale del circuit breaker
+circuit_breaker = CircuitBreaker()
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
@@ -1944,20 +2021,448 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     finally:
         session.close()
 
+async def perform_health_check():
+    """Controllo di salute più approfondito prima dell'avvio"""
+    try:
+        logger.info("🔍 Performing comprehensive health check...")
+
+        # Verifica connessione database
+        session = SessionLocal()
+        session.execute("SELECT 1")
+        session.close()
+        logger.info("✅ Database connection OK")
+
+        # Verifica circuit breaker
+        if not circuit_breaker.can_proceed():
+            logger.critical("🚫 Circuit breaker prevents startup")
+            return False
+
+        # Verifica che non ci siano lock files attivi
+        if os.path.exists(LOCK_FILE):
+            logger.warning("⚠️ Lock file exists - checking if stale...")
+            # Il controllo del lock file è già fatto in create_lock_file()
+
+        logger.info("✅ Health check passed")
+        return True
+
+    except Exception as e:
+        logger.error(f"💥 Health check failed: {e}")
+        circuit_breaker.record_failure()
+        return False
+
+async def start_bot_with_retry(max_retries=3):
+    """Avvio del bot con retry e backoff esponenziale"""
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"🚀 Attempting bot startup (attempt {attempt + 1}/{max_retries})")
+
+            # Health check
+            if not await perform_health_check():
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt * 30  # Backoff esponenziale: 30s, 60s, 120s
+                    logger.warning(f"Health check failed, retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.critical("Max retries reached, giving up")
+                    return False
+
+            # Se siamo qui, health check è passato
+            circuit_breaker.record_success()
+
+            # Avvio normale del bot
+            await run_bot_main_loop()
+            return True
+
+        except telegram.error.Conflict as e:
+            logger.critical(f"Conflict error on attempt {attempt + 1}: {e}")
+            circuit_breaker.record_failure()
+
+            if attempt < max_retries - 1:
+                delay = 2 ** attempt * 60  # Backoff più aggressivo per conflitti: 60s, 120s, 240s
+                logger.warning(f"Conflict detected, retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical("Max retries reached after conflicts, giving up")
+                return False
+
+        except Exception as e:
+            logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
+            circuit_breaker.record_failure()
+
+            if attempt < max_retries - 1:
+                delay = 2 ** attempt * 15  # Backoff per altri errori: 15s, 30s, 60s
+                logger.warning(f"Unexpected error, retrying in {delay} seconds...")
+                await asyncio.sleep(delay)
+            else:
+                logger.critical("Max retries reached after unexpected errors")
+                return False
+
+    return False
+
+async def run_bot_main_loop():
+    """Loop principale del bot con gestione errori migliorata"""
+    # Create PID file to prevent multiple instances
+    create_pid_file()
+
+    # Additional stability check - verify database connection before starting
+    try:
+        from models import SessionLocal, engine
+        # Test database connection
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
+        logger.info("✅ Database connection verified")
+    except Exception as db_e:
+        logger.error(f"💥 Database connection failed: {db_e}")
+        logger.error("Bot cannot start without database connection")
+        raise  # Exit if database is not available
+
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Add comprehensive error handler
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Log the error and handle gracefully."""
+        logger.error(msg="Exception while handling an update:", exc_info=context.error)
+
+        # Check if it's a Conflict error (multiple bot instances)
+        if isinstance(context.error, telegram.error.Conflict):
+            logger.critical("Conflict error detected - Multiple bot instances running!")
+            logger.critical("This could be due to:")
+            logger.critical("1. Another bot instance running elsewhere")
+            logger.critical("2. Previous instance didn't shut down properly")
+            logger.critical("3. Webhook mode conflict with polling mode")
+            logger.critical("4. Bot token being used by another application")
+
+            # For Conflict errors, we need to stop polling immediately
+            # The error will cause the application to restart via Render's policy
+            logger.critical("Stopping polling due to conflict - Render will restart the service")
+            try:
+                # Stop the application immediately
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if hasattr(application, 'stop'):
+                    loop.create_task(application.stop())
+                logger.critical("Application stop initiated...")
+
+                # Clean up PID file immediately
+                remove_pid_file()
+
+            except Exception as shutdown_error:
+                logger.critical(f"Error during shutdown: {shutdown_error}")
+
+            # Re-raise the exception to trigger Render's restart policy
+            raise context.error
+
+        # Check for NetworkError (connection issues)
+        if isinstance(context.error, telegram.error.NetworkError):
+            logger.warning(f"Network error: {context.error}")
+            return
+
+        # Check for RetryAfter (rate limiting)
+        if isinstance(context.error, telegram.error.RetryAfter):
+            logger.warning(f"Rate limited, retry after {context.error.retry_after} seconds")
+            return
+
+        # Check for TimedOut (timeout issues)
+        if isinstance(context.error, telegram.error.TimedOut):
+            logger.warning("Request timed out")
+            return
+
+        # For other errors, try to notify the user
+        if update and hasattr(update, 'effective_chat'):
+            try:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="❌ Si è verificato un errore. Riprova più tardi o contatta il supporto."
+                )
+            except Exception as e:
+                logger.error(f"Failed to send error message to user: {e}")
+
+    # Add error handler
+    application.add_error_handler(error_handler)
+
+    # Add persistence to maintain state across restarts
+    from telegram.ext import PicklePersistence
+
+    # Create persistence directory if it doesn't exist
+    persistence_file = 'bot_persistence'
+    persistence = PicklePersistence(filepath=persistence_file)
+
+    # Rebuild application with persistence
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).persistence(persistence).build()
+
+    # Re-add error handler to new application
+    application.add_error_handler(error_handler)
+
+    # Quick commands
+    async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        session = SessionLocal()
+        try:
+            # User tickets
+            total_tickets = session.query(Ticket).filter(Ticket.user_id == user_id).count()
+            open_tickets = session.query(Ticket).filter(Ticket.user_id == user_id, Ticket.status.in_(['open', 'escalated'])).count()
+
+            # User notifications
+            notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).all()
+            active_notifications = len([n for n in notifications if session.query(List).filter(List.name == n.list_name, List.expiry_date > datetime.now(timezone.utc)).first()])
+
+            # Recent activity
+            recent_activities = session.query(UserActivity).filter(
+                UserActivity.user_id == user_id
+            ).order_by(UserActivity.timestamp.desc()).limit(3).all()
+
+            status_text = f"""
+📊 **Il Tuo Status Personale**
+
+🎫 **Ticket:**
+• Totali: {total_tickets}
+• Aperti: {open_tickets}
+
+🔔 **Notifiche Attive:** {active_notifications}
+
+📅 **Attività Recente:**
+"""
+
+            for activity in recent_activities:
+                time_ago = datetime.now(timezone.utc) - activity.timestamp
+                hours_ago = int(time_ago.total_seconds() / 3600)
+                status_text += f"• {activity.action} ({hours_ago}h fa)\n"
+
+            keyboard = [
+                [InlineKeyboardButton("🎫 I Miei Ticket", callback_data='my_tickets')],
+                [InlineKeyboardButton("📊 Dashboard Completo", callback_data='user_stats')],
+                [InlineKeyboardButton("⬅️ Menu Principale", callback_data='back_to_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+        finally:
+            session.close()
+
+    async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Alias for status command
+        await status_command(update, context)
+
+    async def renew_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        await update.message.reply_text("🔄 **Rinnovo Liste**\n\nInserisci il nome esatto della lista che vuoi rinnovare:", parse_mode='Markdown')
+        context.user_data['action'] = 'quick_renew'
+
+    async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        if not check_rate_limit(user_id):
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            return
+
+        keyboard = [
+            [InlineKeyboardButton("📝 Apri Nuovo Ticket", callback_data='open_ticket')],
+            [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
+            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text("🎫 **Supporto Tecnico**\n\nCome possiamo aiutarti?", reply_markup=reply_markup, parse_mode='Markdown')
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("dashboard", dashboard_command))
+    application.add_handler(CommandHandler("renew", renew_command))
+    application.add_handler(CommandHandler("support", support_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats)$'))
+    application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
+    application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
+    application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
+    application.add_handler(CallbackQueryHandler(delete_list_callback, pattern='^delete_list:'))
+    application.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern='^confirm_delete:'))
+    application.add_handler(CallbackQueryHandler(notify_list_callback, pattern='^notify_list:'))
+    application.add_handler(CallbackQueryHandler(notify_days_callback, pattern='^notify_days:'))
+    application.add_handler(CallbackQueryHandler(open_ticket_callback, pattern='^open_ticket$'))
+    application.add_handler(CallbackQueryHandler(my_tickets_callback, pattern='^my_tickets$'))
+    application.add_handler(CallbackQueryHandler(view_ticket_callback, pattern='^view_ticket:'))
+    application.add_handler(CallbackQueryHandler(reply_ticket_callback, pattern='^reply_ticket:'))
+    application.add_handler(CallbackQueryHandler(close_ticket_callback, pattern='^close_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
+    application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
+    application.add_handler(CallbackQueryHandler(select_list_callback, pattern='^select_list:'))
+    application.add_handler(CallbackQueryHandler(edit_list_callback, pattern='^edit_list:'))
+    application.add_handler(CallbackQueryHandler(edit_field_callback, pattern='^edit_field:'))
+    application.add_handler(CallbackQueryHandler(delete_admin_list_callback, pattern='^delete_admin_list:'))
+    application.add_handler(CallbackQueryHandler(confirm_admin_delete_callback, pattern='^confirm_admin_delete:'))
+    application.add_handler(CallbackQueryHandler(admin_tickets_callback, pattern='^admin_tickets$'))
+    application.add_handler(CallbackQueryHandler(select_ticket_callback, pattern='^select_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_reply_ticket_callback, pattern='^admin_reply_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
+    application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
+    application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern='^admin_stats$'))
+    application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
+    application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
+    application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
+    application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
+
+    # Pianifica backup automatico giornaliero
+    scheduler.add_job(create_backup, CronTrigger(hour=2, minute=0))  # Ogni giorno alle 2:00
+
+    # Pianifica notifiche di scadenza ogni ora
+    scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
+
+    # Enhanced backup scheduling - more frequent for better data safety
+    scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
+    scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
+
+    # Pianifica pulizia automatica dei ticket chiusi dopo 12 ore
+    scheduler.add_job(cleanup_closed_tickets, CronTrigger(hour=3, minute=0))  # Ogni giorno alle 3:00
+
+    # Pianifica sincronizzazione contatori ogni 30 minuti
+    scheduler.add_job(sync_user_counters, CronTrigger(minute='*/30'))  # Ogni 30 minuti
+
+    # Start scheduler for notifications
+    scheduler.start()
+
+    # Enhanced keep-alive system for 24/7 availability
+    import time
+    import requests
+
+    def keep_alive():
+        """Send periodic keep-alive signals to prevent Render from sleeping the service"""
+        port = int(os.environ.get('PORT', 10000))
+        render_url = os.environ.get('RENDER_URL', 'https://erixcastbot.onrender.com')
+
+        while True:
+            try:
+                # Internal health check
+                response = requests.get(f"http://localhost:{port}/", timeout=10)
+                if response.status_code == 200:
+                    logger.info("✅ Internal health check passed")
+
+                    # External ping to keep Render active (if URL is configured)
+                    try:
+                        external_response = requests.get(f"{render_url}/ping", timeout=10)
+                        if external_response.status_code == 200:
+                            logger.info("🌐 External ping successful - Render service active")
+                        else:
+                            logger.warning(f"🌐 External ping failed with status {external_response.status_code}")
+                    except Exception as ext_e:
+                        logger.warning(f"🌐 External ping error: {ext_e}")
+
+                else:
+                    logger.warning(f"❌ Internal health check failed with status {response.status_code}")
+
+            except Exception as e:
+                logger.error(f"💥 Keep-alive error: {e}")
+
+            time.sleep(300)  # Check every 5 minutes
+
+    # Start keep-alive thread
+    import threading
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
+
+    # Main bot loop with enhanced stability
+    try:
+        logger.info("🚀 Starting ErixCast Bot - 24/7 Service Active")
+        logger.info("🤖 Bot is now listening for messages...")
+
+        # Test bot connectivity and clear any existing webhooks
+        try:
+            # Delete any existing webhook first (synchronous call)
+            logger.info("🧹 Deleting any existing webhooks...")
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(application.bot.delete_webhook(drop_pending_updates=True))
+            logger.info("✅ Webhook deleted successfully")
+
+            # Test bot connectivity
+            bot_info = loop.run_until_complete(application.bot.get_me())
+            logger.info(f"✅ Bot connected successfully as @{bot_info.username} (ID: {bot_info.id})")
+
+            # Verify bot can receive messages (send a test message to admin if configured)
+            if ADMIN_IDS:
+                try:
+                    test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')
+                    loop.run_until_complete(application.bot.send_message(
+                        chat_id=ADMIN_IDS[0],
+                        text=test_message,
+                        parse_mode='Markdown'
+                    ))
+                    logger.info(f"✅ Test message sent to admin {ADMIN_IDS[0]}")
+                except Exception as msg_e:
+                    logger.warning(f"⚠️ Could not send test message to admin: {msg_e}")
+
+        except Exception as bot_e:
+            logger.error(f"❌ Bot connection failed: {bot_e}")
+            raise
+
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            timeout=60,  # Increased timeout for better stability
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+            pool_timeout=60
+        )
+    except Exception as e:
+        logger.critical(f"💥 Bot crashed in main loop: {e}")
+        raise
+
 def main():
     # Set up signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Create PID file to prevent multiple instances
-    create_pid_file()
+    # Verifica circuit breaker prima di tutto
+    if not circuit_breaker.can_proceed():
+        logger.critical("🚫 Circuit breaker prevents startup - exiting")
+        sys.exit(1)
 
-    # Add startup delay to allow previous instance to shut down gracefully
+    # Crea lock file per prevenire avvii simultanei
+    create_lock_file()
+
+    # Aumenta il delay di startup per stabilità
     import time
-    startup_delay = int(os.getenv('STARTUP_DELAY', '60'))  # Increased to 60 seconds for better stability
+    startup_delay = int(os.getenv('STARTUP_DELAY', '120'))  # Aumentato a 120 secondi
     logger.info(f"Waiting {startup_delay} seconds for previous instance to shut down...")
     time.sleep(startup_delay)
-    logger.info("Starting bot...")
+
+    # Avvio asincrono con retry
+    try:
+        import asyncio
+        success = asyncio.run(start_bot_with_retry())
+        if success:
+            logger.info("✅ Bot shutdown gracefully")
+        else:
+            logger.critical("💥 Bot failed to start after all retries")
+            sys.exit(1)
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot stopped by user")
+        remove_pid_file()
+        remove_lock_file()
+    except Exception as e:
+        logger.critical(f"💥 Bot crashed with critical error: {e}")
+        remove_pid_file()
+        remove_lock_file()
+        circuit_breaker.record_failure()
+        raise
+    finally:
+        # Cleanup sempre
+        remove_pid_file()
+        remove_lock_file()
 
     # Additional stability check - verify database connection before starting
     try:
