@@ -7,11 +7,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import signal
 import sys
+import asyncio
+import uuid
+from collections import defaultdict
 
 load_dotenv()
 
@@ -102,6 +105,25 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 scheduler = AsyncIOScheduler()
 
+# Code asincroni per operazioni pesanti
+task_queue = asyncio.Queue()
+background_tasks = set()
+
+# Sistema di auto-diagnostica
+health_status = {
+    'database': True,
+    'scheduler': True,
+    'ai_service': True,
+    'last_check': datetime.now(timezone.utc)
+}
+
+# Cache per AI context-aware
+ai_context_cache = {}
+MAX_CONTEXT_CACHE_SIZE = 100
+
+# Sistema di comportamenti utente
+user_behavior_cache = defaultdict(dict)
+
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
@@ -142,6 +164,23 @@ def log_user_action(user_id, action, details=None):
 def log_admin_action(admin_id, action, target=None, details=None):
     """Logga le azioni degli admin"""
     logger.info(f"ADMIN_ACTION - Admin: {admin_id}, Action: {action}, Target: {target}, Details: {details}")
+
+    # Audit log per compliance
+    try:
+        session = SessionLocal()
+        audit_entry = AuditLog(
+            admin_id=admin_id,
+            action=action,
+            target_type=target.get('type') if isinstance(target, dict) else str(target),
+            target_id=target.get('id') if isinstance(target, dict) else None,
+            details=json.dumps(details) if details else None
+        )
+        session.add(audit_entry)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Failed to create audit log: {e}")
+    finally:
+        session.close()
 
 def log_error(error_type, error_message, user_id=None):
     """Logga errori per debugging"""
@@ -646,12 +685,22 @@ Cosa vuoi fare con questa lista?
         title = context.user_data.get('ticket_title')
         session = SessionLocal()
         try:
-            ticket = Ticket(user_id=user_id, title=title, description=message_text)
+            # Admin can set category and priority for tickets
+            category = 'generale'
+            priority = 'media'
+
+            ticket = Ticket(
+                user_id=user_id,
+                title=title,
+                description=message_text,
+                category=category,
+                priority=priority
+            )
             session.add(ticket)
             session.commit()
 
-            # Try AI response first
-            ai_response = await get_ai_response(message_text)
+            # Try AI response first with context awareness
+            ai_response = await get_ai_response(message_text, user_id=user_id)
             ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
             session.add(ticket_message)
 
@@ -794,7 +843,7 @@ Cosa vuoi fare con questa lista?
         context.user_data.pop('edit_field', None)
         context.user_data.pop('edit_list_id', None)
 
-async def get_ai_response(problem_description, is_followup=False, ticket_id=None):
+async def get_ai_response(problem_description, is_followup=False, ticket_id=None, user_id=None):
     try:
         system_prompt = """Sei un assistente tecnico specializzato nel supporto clienti per un'applicazione installata su Amazon Firestick.
 
@@ -831,10 +880,11 @@ NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi d
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        # Add conversation history if this is a followup
+        # AI Context-Aware: Add conversation history and user behavior
         if is_followup and ticket_id:
             session = SessionLocal()
             try:
+                # Get conversation history
                 previous_messages = session.query(TicketMessage).filter(
                     TicketMessage.ticket_id == ticket_id
                 ).order_by(TicketMessage.created_at).limit(10).all()
@@ -844,6 +894,14 @@ NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi d
                         messages.append({"role": "assistant", "content": msg.message})
                     elif not msg.is_admin:
                         messages.append({"role": "user", "content": msg.message})
+
+                # Add user behavior context if available
+                if user_id and user_id in ai_context_cache:
+                    user_context = ai_context_cache[user_id]
+                    if 'common_issues' in user_context:
+                        context_info = f"L'utente ha avuto problemi simili in passato: {', '.join(user_context['common_issues'][:3])}"
+                        messages.append({"role": "system", "content": context_info})
+
             finally:
                 session.close()
 
@@ -855,6 +913,23 @@ NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi d
             max_tokens=400
         )
         ai_text = response.choices[0].message.content.strip()
+
+        # Update AI context cache
+        if user_id:
+            if user_id not in ai_context_cache:
+                ai_context_cache[user_id] = {'common_issues': [], 'last_interaction': datetime.now(timezone.utc)}
+
+            # Extract keywords from the problem for future context
+            problem_keywords = [word.lower() for word in problem_description.split() if len(word) > 3]
+            if problem_keywords:
+                ai_context_cache[user_id]['common_issues'].extend(problem_keywords[:3])
+                ai_context_cache[user_id]['common_issues'] = list(set(ai_context_cache[user_id]['common_issues'][-10:]))  # Keep last 10 unique keywords
+                ai_context_cache[user_id]['last_interaction'] = datetime.now(timezone.utc)
+
+            # Clean cache if too large
+            if len(ai_context_cache) > MAX_CONTEXT_CACHE_SIZE:
+                oldest_user = min(ai_context_cache.keys(), key=lambda x: ai_context_cache[x]['last_interaction'])
+                del ai_context_cache[oldest_user]
 
         # Se l'AI dice che non può risolvere, restituisci None per escalation
         escalation_keywords = [
@@ -871,6 +946,7 @@ NON dire mai "non posso aiutare" - invece guida l'utente attraverso i passaggi d
         return ai_text
     except Exception as e:
         logger.error(f"AI response error: {e}")
+        health_status['ai_service'] = False
         return None
 
 async def renew_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1131,7 +1207,7 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         session.add(user_message)
 
         # Try AI response first for the follow-up
-        ai_response = await get_ai_response(message_text, is_followup=True, ticket_id=ticket_id)
+        ai_response = await get_ai_response(message_text, is_followup=True, ticket_id=ticket_id, user_id=user_id)
         if ai_response:
             ai_message = TicketMessage(
                 ticket_id=ticket_id,
