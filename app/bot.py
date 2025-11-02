@@ -1580,6 +1580,13 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         session.close()
 
 def main():
+    # Add startup delay to allow previous instance to shut down gracefully
+    import time
+    startup_delay = int(os.getenv('STARTUP_DELAY', '30'))  # Default 30 seconds
+    logger.info(f"Waiting {startup_delay} seconds for previous instance to shut down...")
+    time.sleep(startup_delay)
+    logger.info("Starting bot...")
+
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add comprehensive error handler
@@ -1590,7 +1597,9 @@ def main():
         # Check if it's a Conflict error (multiple bot instances)
         if isinstance(context.error, telegram.error.Conflict):
             logger.critical("Conflict error detected - Multiple bot instances running!")
-            return
+            logger.critical("Terminating this bot instance to prevent conflicts...")
+            import sys
+            sys.exit(1)  # Exit with error code to trigger restart policy
 
         # Check for NetworkError (connection issues)
         if isinstance(context.error, telegram.error.NetworkError):
