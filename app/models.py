@@ -53,4 +53,18 @@ class UserNotification(Base):
     list_name = Column(String)
     days_before = Column(Integer)  # 1, 3, or 5 days before expiry
 
+class RenewalRequest(Base):
+    __tablename__ = 'renewal_requests'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    list_name = Column(String)
+    months = Column(Integer)
+    cost = Column(String)
+    status = Column(String, default='pending')  # pending, approved, rejected, contested
+    admin_notes = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime)
+    processed_by = Column(Integer)  # admin user_id who processed it
+
 Base.metadata.create_all(bind=engine)
