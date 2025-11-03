@@ -2074,7 +2074,8 @@ async def perform_health_check():
         # Verifica connessione database
         session = SessionLocal()
         from sqlalchemy import text
-        session.execute(text("SELECT 1"))
+        result = session.execute(text("SELECT 1"))
+        result.fetchone()  # Consume the result
         session.close()
         logger.info("✅ Database connection OK")
 
