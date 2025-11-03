@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
 from datetime import datetime, timezone
-import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class BotMetrics:
@@ -13,7 +15,25 @@ class BotMetrics:
     total_messages: int = 0
     admin_actions: int = 0
     backup_count: int = 0
+    memory_usage_mb: float = 0.0
+    rate_limit_violations: int = 0
+    ai_cache_hits: int = 0
+    ai_cache_misses: int = 0
+    background_tasks_completed: int = 0
     last_updated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def get_admin_only_metrics(self) -> Dict[str, Any]:
+        """Get metrics that should only be visible to admins"""
+        return {
+            'memory_usage_mb': f"{self.memory_usage_mb:.2f} MB",
+            'rate_limit_violations': self.rate_limit_violations,
+            'ai_cache_hits': self.ai_cache_hits,
+            'ai_cache_misses': self.ai_cache_misses,
+            'ai_cache_hit_rate': f"{(self.ai_cache_hits / max(1, self.ai_cache_hits + self.ai_cache_misses)) * 100:.1f}%" if (self.ai_cache_hits + self.ai_cache_misses) > 0 else "0%",
+            'background_tasks_completed': self.background_tasks_completed,
+            'error_rate': f"{self.error_rate:.2%}",
+            'avg_response_time': f"{self.avg_response_time:.2f}s"
+        }
 
 class MetricsCollector:
     def __init__(self):
@@ -22,11 +42,17 @@ class MetricsCollector:
         self.errors_count = 0
         self.total_requests = 0
 
-    def record_ai_response(self, response_time: float):
+    def record_ai_response(self, response_time: float, cached: bool = False):
         """Record AI response time"""
         self.response_times.append(response_time)
         self.metrics.ai_responses += 1
         self.total_requests += 1
+
+        # Track cache performance
+        if cached:
+            self.metrics.ai_cache_hits += 1
+        else:
+            self.metrics.ai_cache_misses += 1
 
         # Keep only last 100 response times
         if len(self.response_times) > 100:
@@ -40,6 +66,21 @@ class MetricsCollector:
         self.errors_count += 1
         self.total_requests += 1
         self.metrics.error_rate = self.errors_count / max(1, self.total_requests)
+        self.metrics.last_updated = datetime.now(timezone.utc)
+
+    def record_rate_limit_violation(self):
+        """Record a rate limit violation"""
+        self.metrics.rate_limit_violations += 1
+        self.metrics.last_updated = datetime.now(timezone.utc)
+
+    def record_background_task_completion(self):
+        """Record background task completion"""
+        self.metrics.background_tasks_completed += 1
+        self.metrics.last_updated = datetime.now(timezone.utc)
+
+    def update_memory_usage(self, memory_mb: float):
+        """Update memory usage"""
+        self.metrics.memory_usage_mb = memory_mb
         self.metrics.last_updated = datetime.now(timezone.utc)
 
     def record_message(self):
