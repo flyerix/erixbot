@@ -24,9 +24,9 @@
 
 **Deploy in 5 minuti, uptime 99.9%, scalabile all'infinito!** 💪
 
-## ⚡ **Feature Matrix - Tutto Quello Che Serve Per Dominare!**
+## ⚡ **Feature Matrix**
 
-### 🎮 **User Experience - Smooth Come La Seta**
+### 🎮 **User Experience**
 
 #### 👤 **Per gli Utenti Finali**
 - **🔍 Smart Search Engine**: Ricerca fuzzy con autocomplete e suggerimenti AI-powered
@@ -36,7 +36,7 @@
 - **🔄 One-Click Renewal Flow**: UX ottimizzata per conversion massima
 - **🛡️ Security-First**: Input validation con sanitizzazione avanzata
 
-#### 👑 **Admin Control Center - Piena Potenza!**
+#### 👑 **Admin Control Center**
 - **⚙️ Enterprise Admin Panel**: Multi-tenant con RBAC avanzato
 - **📋 Real-Time CRUD Operations**: Create/Update/Delete con audit trail completo
 - **🎫 Advanced Ticket Management**: Queue prioritization e bulk operations
@@ -44,7 +44,7 @@
 - **🔄 Automated Workflow Engine**: Approval flows con regole custom
 - **💾 Intelligent Backup System**: Incremental backup con disaster recovery
 
-#### 🤖 **AI Engine - Il Cervello Quantistico**
+#### 🤖 **AI Engine**
 - **🧠 Context-Aware Conversations**: Memoria conversazionale con NLP avanzato
 - **🎯 Smart Escalation Algorithm**: Machine learning per routing intelligente
 - **🌍 Multi-Language Support**: Italiano nativo con supporto 50+ lingue
@@ -53,7 +53,7 @@
 - **🔄 Continuous Learning**: Modello che migliora automaticamente nel tempo
 
 
-## 🚀 **Deploy in 60 Secondi - Zero Configurazione!**
+## 🚀 **Deploy in 60 Secondi**
 
 ### **One-Click Deploy su Render (Raccomandato)**
 
@@ -104,11 +104,11 @@ PYTHONUNBUFFERED=1
     └── 🔍 Error Tracking
 ```
 
-**Uptime garantito 99.9%, auto-recovery, zero manutenzione!** 💯
+**Uptime 99.9%, auto-recovery** 💯
 
-## 🎮 **User Guide - Facile Come Bere un Bicchiere d'Acqua!**
+## 🎮 **User Guide**
 
-### **🚀 Quick Start - 3 Comandi per Dominare Tutto**
+### **🚀 Quick Start**
 
 ```bash
 /start     # 🔥 Accendi il motore!
@@ -116,7 +116,7 @@ PYTHONUNBUFFERED=1
 /status    # 📊 Il tuo impero in tempo reale
 ```
 
-### **💡 Workflow Ottimizzato - Conversion Funnel Perfetta**
+### **💡 Workflow Ottimizzato**
 
 ```
 👤 User Avvia Bot
@@ -143,9 +143,9 @@ PYTHONUNBUFFERED=1
 | `/renew` | 🔄 | Renewal engine con pricing dinamico e sconti automatici |
 | `/support` | 🎫 | AI-powered support con escalation intelligente |
 
-### **👑 Admin Command Center - Il Trono del Potere!**
+### **👑 Admin Command Center**
 
-**Accesso VIP**: Solo per Admin ID configurati
+**Accesso**: Solo per Admin ID configurati
 
 #### **🎛️ Admin Dashboard Features**
 - **📋 List Management**: CRUD operations con bulk actions e templates
@@ -165,96 +165,22 @@ PYTHONUNBUFFERED=1
 **Rate Limiting Intelligente**: Anti-abuse con auto-ban e whitelist dinamica! 🛡️
 
 
-## 📊 **Monitoring & Analytics - Tutto Sotto Controllo!**
+## 📊 **Monitoring & Analytics**
 
-### **🩺 Health Check System - Always Green!**
+### **🩺 Health Check System**
 
 ```bash
 GET /health          # 🏥 Full system diagnostics
 GET /                 # 🤖 Bot status check
 ```
 
-**Real-Time Monitoring Stack:**
-- **❤️ Database Health**: Connection pooling status e query performance
-- **🤖 Bot Connectivity**: Telegram API response time e error rates
-- **🧠 AI Service**: OpenAI API latency e token usage tracking
-- **📊 System Metrics**: CPU, memory, disk I/O con alerting intelligente
-- **🔄 Background Jobs**: Queue status e task completion rates
-
-### **📈 Analytics Dashboard - KPI che Fanno Impazzire!**
-
-#### **Real-Time Metrics**
-- **👥 Active Users**: Concurrent sessions e geographic distribution
-- **🎫 Ticket Analytics**: Resolution time, satisfaction scores, AI accuracy
-- **💰 Revenue Tracking**: Renewal rates, conversion funnels, LTV analysis
-- **⚡ Performance**: API response times, database query optimization
-- **🛡️ Security**: Failed login attempts, rate limit hits, anomaly detection
-
-#### **Business Intelligence**
-- **📊 Trend Analysis**: Weekly/monthly growth metrics
-- **🎯 Conversion Optimization**: A/B testing per feature
-- **👥 User Segmentation**: Behavior clustering e personalization
-- **💡 Predictive Analytics**: Churn prediction e proactive retention
-
-### **🚀 Uptime 99.9% Guaranteed - Enterprise SLA!**
-
-#### **High Availability Architecture**
-```
-🌍 Global CDN (Render)
-├── 🔄 Auto-Scaling Groups
-├── 🛡️ Circuit Breaker Pattern
-├── 🔀 Multi-AZ Deployment
-└── 📊 Real-Time Monitoring
-
-🕐 24/7 Uptime Features:
-├── ⚡ Auto-Recovery (Circuit Breaker)
-├── 🔄 Graceful Shutdown Handling
-├── 📞 Alert System (Email/SMS/Webhook)
-├── 💾 Automated Backups (Point-in-Time)
-└── 🔧 Self-Healing Infrastructure
-```
-
-**Zero Downtime Deployments, Auto-Rollback, Disaster Recovery!** 🛡️
-
-
-## 🏆 **Tech Stack - Bleeding Edge Technology!**
-
-### **Core Technologies**
-- **🐍 Python 3.8+**: Async-first con type hints avanzati
-- **🤖 Telegram Bot API**: Webhook + Polling hybrid architecture
-- **🧠 OpenAI GPT-4**: Context-aware AI con fine-tuning custom
-- **🗄️ PostgreSQL 15+**: ACID compliance con connection pooling
-- **⚡ Redis-like Caching**: In-memory AI response caching
-- **🔄 AsyncIO + APScheduler**: Non-blocking task scheduling
-
-### **Production Stack**
-- **🌐 Render**: Global CDN con auto-scaling intelligente
-- **🐴 Gunicorn**: WSGI server con worker management
-- **📊 Prometheus Metrics**: Enterprise monitoring stack
-- **🔒 OAuth2 + JWT**: Authentication & authorization
-- **📈 ELK Stack**: Log aggregation e analysis
-
-### **Security & Performance**
-- **🛡️ Rate Limiting**: Adaptive throttling con auto-ban
-- **🔒 Input Sanitization**: XSS/SQL injection prevention
-- **📊 Audit Logging**: Complete audit trail per compliance
-- **🔄 Circuit Breaker**: Fault tolerance e graceful degradation
-- **📈 Query Optimization**: Database indexing e prepared statements
-
----
 
 ## 📄 **Licenza & Support**
 
-**Licenza MIT** - Usa, modifica, distribuisci liberamente! 📜
+**Licenza MIT** 📜
 
-### **🤝 Support & Community**
-- **📧 Email**: support@erixcast.com
-- **💬 Telegram**: @ErixCastSupport
-- **📖 Docs**: [docs.erixcast.com](https://docs.erixcast.com)
-- **🐛 Issues**: [GitHub Issues](https://github.com/erixcast/bot/issues)
-- **💡 Feature Requests**: [GitHub Discussions](https://github.com/erixcast/bot/discussions)
 
-### **🚀 Roadmap 2024**
+### **🚀 Roadmap **
 - [ ] **AI Chatbot Avanzato**: Conversazioni multi-turn con memoria persistente
 - [ ] **Mobile App**: React Native app nativa per iOS/Android
 - [ ] **API REST**: Full REST API per integrazioni third-party
@@ -263,15 +189,12 @@ GET /                 # 🤖 Bot status check
 
 ---
 
-## 🎉 **Join the Revolution!**
 
-**⭐ Se ErixCast Bot ti ha fatto impazzire, metti una stella su GitHub!**
 
-**Creato con ❤️ e ☕ per la comunità streaming italiana - perché il futuro è già qui!** 🚀
+**Creato con ❤️ e ☕** 🚀
 
 ---
 
 **⚡ Powered by AI, Built for Scale, Made in Italy! 🇮🇹**
 
 
-Creato con ❤️ per la comunità streaming italiana.
