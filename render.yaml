@@ -4,14 +4,14 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python app/main.py
-    healthCheckPath: /
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --access-logfile - --error-logfile - app.main:app
+    healthCheckPath: /health
     restartPolicy: on_failure
     autoDeploy: true
     # Enhanced configuration for 24/7 availability
-    maxShutdownDelaySeconds: 30
+    maxShutdownDelaySeconds: 60
     healthCheckTimeout: 30
-    # Environment variables for uptime monitoring
+    # Environment variables for production deployment
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         fromSecret: telegram_bot_token
@@ -28,4 +28,12 @@ services:
       - key: RENDER_URL
         fromSecret: render_url
       - key: STARTUP_DELAY
-        value: 60
+        value: 30
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_POOL_SIZE
+        value: 5
+      - key: DATABASE_MAX_OVERFLOW
+        value: 10
