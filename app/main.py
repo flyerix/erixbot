@@ -1,25 +1,52 @@
+from flask import Flask, jsonify, request
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import QueuePool
 from datetime import datetime, timezone
 import os
+import logging
+import sys
 
+# Configure logging for production
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Environment validation
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
+    logger.error("DATABASE_URL environment variable is required")
     raise ValueError("DATABASE_URL environment variable is required")
 
-# Enhanced connection pooling for Render compatibility
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
+    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
+
+# Database configuration optimized for Render
+pool_size = int(os.getenv('DATABASE_POOL_SIZE', '5'))
+max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '10'))
+
 engine = create_engine(
     DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=5,  # Render free tier limit
-    max_overflow=10,
+    pool_size=pool_size,
+    max_overflow=max_overflow,
     pool_timeout=30,
-    pool_recycle=3600,  # Recycle connections every hour
-    pool_pre_ping=True  # Verify connections before use
+    pool_recycle=1800,  # Recycle connections every 30 minutes for Render
+    pool_pre_ping=True,  # Verify connections before use
+    echo=False  # Disable SQL logging in production
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Flask app for health checks
+app = Flask(__name__)
 
 Base = declarative_base()
 
@@ -135,3 +162,65 @@ class UserBehavior(Base):
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 Base.metadata.create_all(bind=engine)
+
+# Health check endpoint for Render
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Render monitoring"""
+    try:
+        # Test database connection
+        session = SessionLocal()
+        session.execute("SELECT 1")
+        session.commit()
+        session.close()
+
+        return jsonify({
+            'status': 'healthy',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'database': 'connected'
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }), 500
+
+@app.route('/')
+def root():
+    """Root endpoint"""
+    return jsonify({
+        'service': 'ErixCastBot',
+        'status': 'running',
+        'version': '2.0.0'
+    })
+
+# Import and run bot in a separate thread
+def run_bot():
+    """Run the bot in a separate thread"""
+    try:
+        logger.info("Starting ErixCastBot...")
+        from bot import main as bot_main
+        bot_main()
+    except Exception as e:
+        logger.error(f"Bot failed to start: {e}")
+        raise
+
+# For production deployment (Gunicorn)
+if __name__ != '__main__':
+    # This block runs when imported by Gunicorn
+    import threading
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    logger.info("ErixCastBot started successfully in production mode")
+
+if __name__ == '__main__':
+    # For local development only
+    import threading
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"Starting Flask server on port {port}")
+    app.run(host='0.0.0.0', port=port)
