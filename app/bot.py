@@ -8,6 +8,12 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior
+from utils.validation import sanitize_text, validate_and_sanitize_input
+from utils.rate_limiting import rate_limiter
+from utils.metrics_py import metrics_collector
+from services.ai_services import ai_service
+from services.task_manager import task_manager
+from services.memory_manager import memory_manager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import signal
@@ -18,24 +24,32 @@ from collections import defaultdict
 
 load_dotenv()
 
-# Configurazione logging avanzato
+# Configurazione logging avanzato per produzione
+log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, log_level, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
+        logging.StreamHandler(sys.stdout)  # Solo stdout per Render
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Directory per backup
-BACKUP_DIR = 'backups'
-os.makedirs(BACKUP_DIR, exist_ok=True)
+# Directory per backup (solo se non in produzione)
+if os.getenv('RENDER') != 'true':
+    BACKUP_DIR = 'backups'
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+else:
+    BACKUP_DIR = '/tmp/backups'  # Usa /tmp per Render
+    os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # PID file management for preventing multiple instances
-PID_FILE = 'bot.pid'
-LOCK_FILE = 'bot.lock'
+if os.getenv('RENDER') == 'true':
+    PID_FILE = '/tmp/bot.pid'
+    LOCK_FILE = '/tmp/bot.lock'
+else:
+    PID_FILE = 'bot.pid'
+    LOCK_FILE = 'bot.lock'
 
 def create_pid_file():
     """Create a PID file to prevent multiple instances"""
@@ -150,7 +164,25 @@ circuit_breaker = CircuitBreaker()
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
     logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
+
+    # Stop scheduler gracefully
+    if scheduler.running:
+        scheduler.shutdown(wait=True)
+        logger.info("✅ Scheduler shutdown complete")
+
+    # Stop background task manager
+    task_manager.shutdown()
+    logger.info("✅ Task manager shutdown complete")
+
+    # Stop memory monitoring
+    memory_manager.stop_monitoring()
+    logger.info("✅ Memory monitoring stopped")
+
+    # Clean up files
     remove_pid_file()
+    remove_lock_file()
+
+    logger.info("✅ Graceful shutdown completed")
     sys.exit(0)
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -173,10 +205,14 @@ if not ADMIN_IDS:
 
 logger.info("✅ Environment variables validated successfully")
 
-# Rate limiting
-user_action_counts = {}
-RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX_ACTIONS = 10  # max actions per window
+# Enhanced rate limiting using the new rate limiter
+RATE_LIMITS = {
+    'search_list': {'limit': 10, 'window': 60},
+    'open_ticket': {'limit': 3, 'window': 300},
+    'send_message': {'limit': 20, 'window': 60},
+    'admin_action': {'limit': 50, 'window': 60},
+    'ai_request': {'limit': 5, 'window': 60},
+}
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -208,20 +244,21 @@ def get_user_prefix(user_id):
     return "👑 Admin" if is_admin(user_id) else "👤 User"
 
 # Funzioni di logging avanzato
-def check_rate_limit(user_id):
-    """Check if user is within rate limits"""
-    now = datetime.now(timezone.utc).timestamp()
-    if user_id not in user_action_counts:
-        user_action_counts[user_id] = []
+def check_rate_limit(user_id, action='general'):
+    """Check if user is within rate limits using enhanced rate limiter"""
+    if action not in RATE_LIMITS:
+        action = 'send_message'  # Default action
 
-    # Clean old entries
-    user_action_counts[user_id] = [t for t in user_action_counts[user_id] if now - t < RATE_LIMIT_WINDOW]
+    limit = RATE_LIMITS[action]['limit']
+    window = RATE_LIMITS[action]['window']
 
-    if len(user_action_counts[user_id]) >= RATE_LIMIT_MAX_ACTIONS:
-        return False
+    allowed = rate_limiter.check_limit(user_id, action, limit, window)
 
-    user_action_counts[user_id].append(now)
-    return True
+    if not allowed:
+        metrics_collector.record_rate_limit_violation()
+        logger.warning(f"Rate limit exceeded for user {user_id}, action: {action}")
+
+    return allowed
 
 def log_user_action(user_id, action, details=None):
     """Logga le azioni degli utenti per monitoraggio"""
@@ -413,7 +450,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"👋 User {user_id} started the bot")
 
     # Check rate limit
-    if not check_rate_limit(user_id):
+    if not check_rate_limit(user_id, 'send_message'):
         logger.warning(f"⚠️ Rate limit exceeded for user {user_id}")
         await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
         return
@@ -779,7 +816,10 @@ Cosa vuoi fare con questa lista?
             session.commit()
 
             # Try AI response first with context awareness
-            ai_response = await get_ai_response(message_text, user_id=user_id)
+            if message_text:
+                ai_response = ai_service.get_ai_response(message_text, is_followup=False, ticket_id=int(ticket.id), user_id=user_id)
+            else:
+                ai_response = None
             ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
             session.add(ticket_message)
 
@@ -1286,7 +1326,10 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         session.add(user_message)
 
         # Try AI response first for the follow-up
-        ai_response = await get_ai_response(message_text, is_followup=True, ticket_id=ticket_id, user_id=user_id)
+        if message_text:
+            ai_response = ai_service.get_ai_response(message_text, is_followup=True, ticket_id=ticket_id, user_id=user_id)
+        else:
+            ai_response = None
         if ai_response:
             ai_message = TicketMessage(
                 ticket_id=ticket_id,
@@ -2161,8 +2204,8 @@ async def run_bot_main_loop():
                     asyncio.create_task(application.stop())
                 logger.critical("Application stop initiated...")
 
-                # Clean up PID file immediately
-                remove_pid_file()
+                # Trigger graceful shutdown
+                signal_handler(signal.SIGTERM, None)
 
             except Exception as shutdown_error:
                 logger.critical(f"Error during shutdown: {shutdown_error}")
@@ -2185,7 +2228,7 @@ async def run_bot_main_loop():
             logger.warning("Request timed out")
             return
 
-        # For other errors, try to notify the user
+        # For other errors, try to notify the user and log for production monitoring
         if update and hasattr(update, 'effective_chat'):
             try:
                 await context.bot.send_message(
@@ -2194,6 +2237,15 @@ async def run_bot_main_loop():
                 )
             except Exception as e:
                 logger.error(f"Failed to send error message to user: {e}")
+
+        # Log error for production monitoring
+        logger.error(f"Unhandled error in bot: {context.error}", exc_info=context.error)
+
+        # Record error in metrics
+        try:
+            metrics_collector.record_error()
+        except Exception as metrics_error:
+            logger.error(f"Failed to record error in metrics: {metrics_error}")
 
     # Add error handler
     application.add_error_handler(error_handler)
@@ -2346,6 +2398,10 @@ async def run_bot_main_loop():
     # Pianifica notifiche di scadenza ogni ora
     scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
 
+    # Enhanced background tasks
+    scheduler.add_job(lambda: task_manager.process_queued_tasks(), CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
+    scheduler.add_job(lambda: memory_manager.perform_cleanup() if memory_manager.should_cleanup() else None, CronTrigger(minute='*/30'))  # Memory cleanup every 30 minutes
+
     # Enhanced backup scheduling - more frequent for better data safety
     scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
     scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
@@ -2397,6 +2453,14 @@ async def run_bot_main_loop():
     import threading
     keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
     keep_alive_thread.start()
+
+    # Start memory monitoring
+    memory_manager.start_monitoring(interval_seconds=300)  # Check every 5 minutes
+
+    # Update metrics with memory info
+    memory_info = memory_manager.get_memory_usage()
+    if 'rss_mb' in memory_info:
+        metrics_collector.update_memory_usage(memory_info['rss_mb'])
 
     # Main bot loop with enhanced stability
     try:
@@ -2474,18 +2538,15 @@ def main():
             sys.exit(1)
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
-        remove_pid_file()
-        remove_lock_file()
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
         logger.critical(f"💥 Bot crashed with critical error: {e}")
-        remove_pid_file()
-        remove_lock_file()
         circuit_breaker.record_failure()
+        signal_handler(signal.SIGTERM, None)
         raise
     finally:
         # Cleanup sempre
-        remove_pid_file()
-        remove_lock_file()
+        signal_handler(signal.SIGTERM, None)
 
 if __name__ == '__main__':
     main()
