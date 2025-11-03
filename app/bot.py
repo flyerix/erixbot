@@ -2509,9 +2509,13 @@ async def run_bot_main_loop():
         raise
 
 def main():
-    # Set up signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Set up signal handlers for graceful shutdown (only in main thread)
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    except ValueError:
+        # Signal handling not available in this thread (e.g., when run from Flask)
+        logger.warning("Signal handling not available in current thread - graceful shutdown disabled")
 
     # Verifica circuit breaker prima di tutto
     if not circuit_breaker.can_proceed():
