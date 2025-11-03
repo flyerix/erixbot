@@ -102,5 +102,25 @@ class UserActivity(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     details = Column(Text)
 
-Base.metadata.create_all(bind=engine)
+class AuditLog(Base):
+    __tablename__ = 'audit_logs'
 
+    id = Column(Integer, primary_key=True, index=True)
+    admin_id = Column(Integer, index=True)
+    action = Column(String, index=True)
+    target_type = Column(String, index=True)  # 'user', 'list', 'ticket', etc.
+    target_id = Column(Integer, index=True)
+    details = Column(Text)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+class UserBehavior(Base):
+    __tablename__ = 'user_behaviors'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    behavior_type = Column(String, index=True)  # 'suspicious', 'frequent_user', 'power_user', etc.
+    score = Column(Integer, default=0)  # Behavior score for analysis
+    last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    details = Column(Text)
+
+Base.metadata.create_all(bind=engine)
