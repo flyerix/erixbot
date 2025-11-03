@@ -170,7 +170,8 @@ def health_check():
     try:
         # Test database connection
         session = SessionLocal()
-        session.execute("SELECT 1")
+        from sqlalchemy import text
+        session.execute(text("SELECT 1"))
         session.commit()
         session.close()
 
@@ -224,3 +225,4 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     logger.info(f"Starting Flask server on port {port}")
     app.run(host='0.0.0.0', port=port)
+
