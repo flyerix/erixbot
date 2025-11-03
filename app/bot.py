@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior
 from utils.validation import sanitize_text, validate_and_sanitize_input
 from utils.rate_limiting import rate_limiter
-from utils.metrics_py import metrics_collector
+from utils.metrics import metrics_collector
 from services.ai_services import ai_service
 from services.task_manager import task_manager
 from services.memory_manager import memory_manager
