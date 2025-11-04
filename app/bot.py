@@ -2561,7 +2561,7 @@ async def run_bot_main_loop():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
-                # Run polling with the new event loop
+                # Run polling with the new event loop - disable signal handling to avoid threading issues
                 application.run_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
@@ -2569,7 +2569,9 @@ async def run_bot_main_loop():
                     read_timeout=60,
                     write_timeout=60,
                     connect_timeout=60,
-                    pool_timeout=60
+                    pool_timeout=60,
+                    # Disable signal handling in the polling thread
+                    stop_signals=None
                 )
             except Exception as e:
                 logger.critical(f"Polling thread crashed: {e}")
