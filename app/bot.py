@@ -7,6 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
+import pytz
 from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior
 from utils.validation import sanitize_text, validate_and_sanitize_input
 from utils.rate_limiting import rate_limiter
@@ -33,6 +34,11 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)  # Solo stdout per Render
     ]
 )
+
+# Set timezone to Italy (Europe/Rome)
+italy_tz = pytz.timezone('Europe/Rome')
+logging.Formatter.converter = lambda *args: datetime.now(italy_tz).timetuple()
+
 logger = logging.getLogger(__name__)
 
 # Directory per backup (solo se non in produzione)
@@ -2529,7 +2535,7 @@ async def run_bot_main_loop():
             # Verify bot can receive messages (send a test message to admin if configured)
             if ADMIN_IDS:
                 try:
-                    test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')
+                    test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')
                     await application.bot.send_message(
                         chat_id=ADMIN_IDS[0],
                         text=test_message,
@@ -2544,34 +2550,20 @@ async def run_bot_main_loop():
             raise
 
         # Use run_polling for better thread safety (not awaitable)
-        # Run polling with proper async handling
+        # Run polling with proper async handling - simplified approach
         import asyncio
-        try:
-            asyncio.run(application.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True,
-                timeout=60,  # Increased timeout for better stability
-                read_timeout=60,
-                write_timeout=60,
-                connect_timeout=60,
-                pool_timeout=60
-            ))
-        except RuntimeError as e:
-            if "already running" in str(e):
-                # Event loop already running, use different approach
-                logger.warning("Event loop already running, using alternative polling method")
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(application.run_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True,
-                    timeout=60,
-                    read_timeout=60,
-                    write_timeout=60,
-                    connect_timeout=60,
-                    pool_timeout=60
-                ))
-            else:
-                raise
+
+        # Force synchronous polling to avoid threading issues
+        logger.info("Starting polling in synchronous mode to avoid threading issues")
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            timeout=60,  # Increased timeout for better stability
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+            pool_timeout=60
+        )
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
