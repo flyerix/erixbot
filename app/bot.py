@@ -2544,16 +2544,34 @@ async def run_bot_main_loop():
             raise
 
         # Use run_polling for better thread safety (not awaitable)
-        # Run polling - threading issues are handled by the retry mechanism
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            timeout=60,  # Increased timeout for better stability
-            read_timeout=60,
-            write_timeout=60,
-            connect_timeout=60,
-            pool_timeout=60
-        )
+        # Run polling with proper async handling
+        import asyncio
+        try:
+            asyncio.run(application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                timeout=60,  # Increased timeout for better stability
+                read_timeout=60,
+                write_timeout=60,
+                connect_timeout=60,
+                pool_timeout=60
+            ))
+        except RuntimeError as e:
+            if "already running" in str(e):
+                # Event loop already running, use different approach
+                logger.warning("Event loop already running, using alternative polling method")
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(application.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    timeout=60,
+                    read_timeout=60,
+                    write_timeout=60,
+                    connect_timeout=60,
+                    pool_timeout=60
+                ))
+            else:
+                raise
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
