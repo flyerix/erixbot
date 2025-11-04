@@ -2579,8 +2579,9 @@ async def run_bot_main_loop():
                     for h in handler:
                         polling_app.add_handler(h)
 
-                # Copy error handler
-                polling_app.add_error_handler(application.error_handler)
+                # Copy error handlers
+                for error_handler in application.error_handlers:
+                    polling_app.add_error_handler(error_handler)
 
                 # Run polling with the new event loop - disable signal handling to avoid threading issues
                 polling_app.run_polling(
