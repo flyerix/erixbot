@@ -2561,8 +2561,29 @@ async def run_bot_main_loop():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
+                # Create a new httpx client for this thread to avoid event loop conflicts
+                from telegram.request import HTTPXRequest
+                request = HTTPXRequest(
+                    connection_pool_size=8,
+                    read_timeout=60,
+                    write_timeout=60,
+                    connect_timeout=60,
+                    pool_timeout=60
+                )
+
+                # Create application with the new request handler
+                polling_app = Application.builder().token(TELEGRAM_BOT_TOKEN).request(request).build()
+
+                # Copy handlers from main application
+                for handler in application.handlers.values():
+                    for h in handler:
+                        polling_app.add_handler(h)
+
+                # Copy error handler
+                polling_app.add_error_handler(application.error_handler)
+
                 # Run polling with the new event loop - disable signal handling to avoid threading issues
-                application.run_polling(
+                polling_app.run_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
                     timeout=60,  # Increased timeout for better stability
