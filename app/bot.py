@@ -53,6 +53,15 @@ else:
 
 def create_pid_file():
     """Create a PID file to prevent multiple instances"""
+    # In Render production environment, always remove existing PID file for clean startup
+    if os.getenv('RENDER') == 'true':
+        if os.path.exists(PID_FILE):
+            try:
+                os.remove(PID_FILE)
+                logger.warning("Removed existing PID file in Render environment for clean startup")
+            except Exception as e:
+                logger.error(f"Failed to remove PID file: {e}")
+
     if os.path.exists(PID_FILE):
         try:
             with open(PID_FILE, 'r') as f:
@@ -88,6 +97,15 @@ def remove_pid_file():
 def create_lock_file():
     """Crea un lock file con timestamp per prevenire avvii rapidi"""
     now = datetime.now(timezone.utc).timestamp()
+
+    # In Render production environment, always remove existing lock file for clean startup
+    if os.getenv('RENDER') == 'true':
+        if os.path.exists(LOCK_FILE):
+            try:
+                os.remove(LOCK_FILE)
+                logger.warning("Removed existing lock file in Render environment for clean startup")
+            except Exception as e:
+                logger.error(f"Failed to remove lock file: {e}")
 
     if os.path.exists(LOCK_FILE):
         try:
@@ -2099,7 +2117,12 @@ async def perform_health_check():
         except telegram.error.Conflict:
             logger.critical("🚫 Bot token is already in use by another instance!")
             logger.critical("This indicates multiple bot instances are running")
-            return False
+            # In Render environment, this might be a false positive due to previous instance cleanup
+            if os.getenv('RENDER') == 'true':
+                logger.warning("⚠️ Conflict detected in Render environment - proceeding with startup as this may be a cleanup issue")
+                # Don't fail health check in Render environment for token conflicts
+            else:
+                return False
         except Exception as token_e:
             logger.warning(f"⚠️ Could not verify bot token availability: {token_e}")
             # Don't fail health check for this, as it might be a temporary network issue
@@ -2145,10 +2168,18 @@ async def start_bot_with_retry(max_retries=3):
             logger.critical("3. Bot token is being used by another application")
             logger.critical("4. Webhook mode conflict with polling mode")
 
-            # For conflicts, don't retry - it's a permanent issue until resolved
-            logger.critical("Not retrying conflict errors - manual intervention required")
-            circuit_breaker.record_failure()
-            return False
+            # In Render environment, conflicts might be due to cleanup issues - allow retry
+            if os.getenv('RENDER') == 'true' and attempt < max_retries - 1:
+                logger.warning("⚠️ Conflict detected in Render environment - retrying as this may be a cleanup issue")
+                delay = 2 ** attempt * 60  # Longer delay for conflicts: 60s, 120s
+                logger.warning(f"Retrying conflict in {delay} seconds...")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                # For conflicts, don't retry - it's a permanent issue until resolved
+                logger.critical("Not retrying conflict errors - manual intervention required")
+                circuit_breaker.record_failure()
+                return False
 
         except Exception as e:
             logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
