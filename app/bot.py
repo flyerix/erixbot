@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 import pytz
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog, UserBehavior
 from utils.validation import sanitize_text, validate_and_sanitize_input
 from utils.rate_limiting import rate_limiter
 from utils.metrics import metrics_collector
@@ -748,31 +748,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
-    elif data.startswith('feedback:'):
-        parts = data.split(':')
-        ticket_id = int(parts[1])
-        rating = int(parts[2])
-        user_id = query.from_user.id
-
-        session = SessionLocal()
-        try:
-            ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
-            if ticket:
-                if rating > 0:
-                    feedback = TicketFeedback(
-                        ticket_id=ticket_id,
-                        user_id=user_id,
-                        rating=rating
-                    )
-                    session.add(feedback)
-                    session.commit()
-                    await query.edit_message_text(f"✅ Grazie per il feedback! ⭐ ({rating}/5)\n\nIl tuo parere ci aiuta a migliorare il servizio. 🎉")
-                else:
-                    await query.edit_message_text("✅ Ticket chiuso! Grazie per aver utilizzato il nostro servizio. 🎉")
-            else:
-                await query.edit_message_text("❌ Ticket non trovato.")
-        finally:
-            session.close()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1405,18 +1380,7 @@ async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
             ticket.status = 'closed'
             session.commit()
 
-            # Ask for feedback
-            feedback_keyboard = [
-                [InlineKeyboardButton("⭐⭐⭐⭐⭐ Eccellente", callback_data=f'feedback:{ticket_id}:5')],
-                [InlineKeyboardButton("⭐⭐⭐⭐ Buono", callback_data=f'feedback:{ticket_id}:4')],
-                [InlineKeyboardButton("⭐⭐⭐ Sufficiente", callback_data=f'feedback:{ticket_id}:3')],
-                [InlineKeyboardButton("⭐⭐ Scarso", callback_data=f'feedback:{ticket_id}:2')],
-                [InlineKeyboardButton("⭐ Molto Scarso", callback_data=f'feedback:{ticket_id}:1')],
-                [InlineKeyboardButton("⏭️ Salta Feedback", callback_data=f'feedback:{ticket_id}:0')]
-            ]
-            reply_markup = InlineKeyboardMarkup(feedback_keyboard)
-
-            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\n📝 **Valuta il supporto ricevuto:**\n\nCome valuti l'assistenza che hai ricevuto?", reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉", parse_mode='Markdown')
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -1452,18 +1416,7 @@ async def close_ticket_user_callback(update: Update, context: ContextTypes.DEFAU
             ticket.status = 'closed'
             session.commit()
 
-            # Ask for feedback
-            feedback_keyboard = [
-                [InlineKeyboardButton("⭐⭐⭐⭐⭐ Eccellente", callback_data=f'feedback:{ticket_id}:5')],
-                [InlineKeyboardButton("⭐⭐⭐⭐ Buono", callback_data=f'feedback:{ticket_id}:4')],
-                [InlineKeyboardButton("⭐⭐⭐ Sufficiente", callback_data=f'feedback:{ticket_id}:3')],
-                [InlineKeyboardButton("⭐⭐ Scarso", callback_data=f'feedback:{ticket_id}:2')],
-                [InlineKeyboardButton("⭐ Molto Scarso", callback_data=f'feedback:{ticket_id}:1')],
-                [InlineKeyboardButton("⏭️ Salta Feedback", callback_data=f'feedback:{ticket_id}:0')]
-            ]
-            reply_markup = InlineKeyboardMarkup(feedback_keyboard)
-
-            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\n📝 **Valuta il supporto ricevuto:**\n\nCome valuti l'assistenza che hai ricevuto?", reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉", parse_mode='Markdown')
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -1556,9 +1509,8 @@ async def cleanup_closed_tickets():
 
         deleted_count = 0
         for ticket in old_closed_tickets:
-            # Elimina anche messaggi e feedback associati
+            # Elimina anche messaggi associati
             session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket.id).delete()
-            session.query(TicketFeedback).filter(TicketFeedback.ticket_id == ticket.id).delete()
             session.delete(ticket)
             deleted_count += 1
 
@@ -2491,7 +2443,7 @@ async def run_bot_main_loop():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
     logger.info("📝 Registering callback query handlers...")
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|feedback:)$'))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
