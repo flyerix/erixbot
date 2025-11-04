@@ -183,22 +183,34 @@ def signal_handler(signum, frame):
     """Handle shutdown signals gracefully"""
     logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
 
-    # Stop scheduler gracefully
-    if scheduler.running:
-        scheduler.shutdown(wait=True)
-        logger.info("✅ Scheduler shutdown complete")
+    try:
+        # Stop scheduler gracefully
+        if scheduler.running:
+            scheduler.shutdown(wait=True)
+            logger.info("✅ Scheduler shutdown complete")
+    except Exception as e:
+        logger.error(f"Error shutting down scheduler: {e}")
 
-    # Stop background task manager
-    task_manager.shutdown()
-    logger.info("✅ Task manager shutdown complete")
+    try:
+        # Stop background task manager
+        task_manager.shutdown()
+        logger.info("✅ Task manager shutdown complete")
+    except Exception as e:
+        logger.error(f"Error shutting down task manager: {e}")
 
-    # Stop memory monitoring
-    memory_manager.stop_monitoring()
-    logger.info("✅ Memory monitoring stopped")
+    try:
+        # Stop memory monitoring
+        memory_manager.stop_monitoring()
+        logger.info("✅ Memory monitoring stopped")
+    except Exception as e:
+        logger.error(f"Error stopping memory monitoring: {e}")
 
     # Clean up files
-    remove_pid_file()
-    remove_lock_file()
+    try:
+        remove_pid_file()
+        remove_lock_file()
+    except Exception as e:
+        logger.error(f"Error cleaning up files: {e}")
 
     logger.info("✅ Graceful shutdown completed")
     sys.exit(0)
@@ -2426,28 +2438,30 @@ async def run_bot_main_loop():
 
     logger.info("✅ All handlers registered successfully")
 
-    # Pianifica backup automatico giornaliero
-    scheduler.add_job(create_backup, CronTrigger(hour=2, minute=0))  # Ogni giorno alle 2:00
+    # Only add jobs if scheduler is not already running
+    if not scheduler.running:
+        # Pianifica backup automatico giornaliero
+        scheduler.add_job(create_backup, CronTrigger(hour=2, minute=0))  # Ogni giorno alle 2:00
 
-    # Pianifica notifiche di scadenza ogni ora
-    scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
+        # Pianifica notifiche di scadenza ogni ora
+        scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
 
-    # Enhanced background tasks
-    scheduler.add_job(lambda: task_manager.process_queued_tasks(), CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
-    scheduler.add_job(lambda: memory_manager.perform_cleanup() if memory_manager.should_cleanup() else None, CronTrigger(minute='*/30'))  # Memory cleanup every 30 minutes
+        # Enhanced background tasks
+        scheduler.add_job(lambda: task_manager.process_queued_tasks(), CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
+        scheduler.add_job(lambda: memory_manager.perform_cleanup() if memory_manager.should_cleanup() else None, CronTrigger(minute='*/30'))  # Memory cleanup every 30 minutes
 
-    # Enhanced backup scheduling - more frequent for better data safety
-    scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
-    scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
+        # Enhanced backup scheduling - more frequent for better data safety
+        scheduler.add_job(create_backup, CronTrigger(hour=6, minute=0))  # Daily backup at 6 AM
+        scheduler.add_job(create_backup, CronTrigger(hour=18, minute=0))  # Daily backup at 6 PM
 
-    # Pianifica pulizia automatica dei ticket chiusi dopo 12 ore
-    scheduler.add_job(cleanup_closed_tickets, CronTrigger(hour=3, minute=0))  # Ogni giorno alle 3:00
+        # Pianifica pulizia automatica dei ticket chiusi dopo 12 ore
+        scheduler.add_job(cleanup_closed_tickets, CronTrigger(hour=3, minute=0))  # Ogni giorno alle 3:00
 
-    # Pianifica sincronizzazione contatori ogni 30 minuti
-    scheduler.add_job(sync_user_counters, CronTrigger(minute='*/30'))  # Ogni 30 minuti
+        # Pianifica sincronizzazione contatori ogni 30 minuti
+        scheduler.add_job(sync_user_counters, CronTrigger(minute='*/30'))  # Ogni 30 minuti
 
-    # Start scheduler for notifications
-    scheduler.start()
+        # Start scheduler for notifications
+        scheduler.start()
 
     # Enhanced keep-alive system for 24/7 availability
     import time
@@ -2529,18 +2543,27 @@ async def run_bot_main_loop():
             logger.error(f"❌ Bot connection failed: {bot_e}")
             raise
 
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            timeout=60,  # Increased timeout for better stability
-            read_timeout=60,
-            write_timeout=60,
-            connect_timeout=60,
-            pool_timeout=60
-        )
+        # Use run_polling for better thread safety (not awaitable)
+        # Fix threading issues by ensuring we're in the main thread
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                timeout=60,  # Increased timeout for better stability
+                read_timeout=60,
+                write_timeout=60,
+                connect_timeout=60,
+                pool_timeout=60
+            )
+        else:
+            logger.critical("Bot must run in main thread - exiting")
+            raise RuntimeError("Bot must run in main thread")
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
-        raise
+        # Don't re-raise the exception to avoid triggering Render's restart policy
+        # Instead, let the retry mechanism handle it
+        return
 
 def main():
     # Set up signal handlers for graceful shutdown (only in main thread)
