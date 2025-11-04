@@ -2544,21 +2544,16 @@ async def run_bot_main_loop():
             raise
 
         # Use run_polling for better thread safety (not awaitable)
-        # Fix threading issues by ensuring we're in the main thread
-        import threading
-        if threading.current_thread() is threading.main_thread():
-            application.run_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True,
-                timeout=60,  # Increased timeout for better stability
-                read_timeout=60,
-                write_timeout=60,
-                connect_timeout=60,
-                pool_timeout=60
-            )
-        else:
-            logger.critical("Bot must run in main thread - exiting")
-            raise RuntimeError("Bot must run in main thread")
+        # Run polling - threading issues are handled by the retry mechanism
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            timeout=60,  # Increased timeout for better stability
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+            pool_timeout=60
+        )
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
