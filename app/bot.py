@@ -841,8 +841,7 @@ Cosa vuoi fare con questa lista?
             ticket = Ticket(
                 user_id=user_id,
                 title=title,
-                description=message_text,
-                status='open'         # Default status
+                description=message_text
             )
             session.add(ticket)
             session.commit()
