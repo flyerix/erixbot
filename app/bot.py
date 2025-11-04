@@ -2205,7 +2205,8 @@ async def run_bot_main_loop():
         from models import SessionLocal, engine
         # Test database connection
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            from sqlalchemy import text
+            conn.execute(text("SELECT 1"))
         logger.info("✅ Database connection verified")
     except Exception as db_e:
         logger.error(f"💥 Database connection failed: {db_e}")
@@ -2555,14 +2556,14 @@ def main():
         logger.critical("🚫 Circuit breaker prevents startup - exiting")
         sys.exit(1)
 
-    # Crea lock file per prevenire avvii simultanei
-    create_lock_file()
-
     # Aumenta il delay di startup per stabilità
     import time
     startup_delay = int(os.getenv('STARTUP_DELAY', '120'))  # Aumentato a 120 secondi
     logger.info(f"Waiting {startup_delay} seconds for previous instance to shut down...")
     time.sleep(startup_delay)
+
+    # Crea lock file per prevenire avvii simultanei
+    create_lock_file()
 
     # Avvio asincrono con retry
     try:
