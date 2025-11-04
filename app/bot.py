@@ -2494,7 +2494,7 @@ async def run_bot_main_loop():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
     logger.info("📝 Registering callback query handlers...")
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats)$'))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|feedback:)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
