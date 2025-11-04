@@ -2550,20 +2550,32 @@ async def run_bot_main_loop():
             raise
 
         # Use run_polling for better thread safety (not awaitable)
-        # Run polling with proper async handling - simplified approach
-        import asyncio
+        # Use a completely different approach - run polling in a separate thread
+        import threading
 
-        # Force synchronous polling to avoid threading issues
-        logger.info("Starting polling in synchronous mode to avoid threading issues")
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            timeout=60,  # Increased timeout for better stability
-            read_timeout=60,
-            write_timeout=60,
-            connect_timeout=60,
-            pool_timeout=60
-        )
+        def run_polling():
+            """Run polling in a separate thread to avoid main thread issues"""
+            try:
+                logger.info("Starting polling in separate thread")
+                application.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    timeout=60,  # Increased timeout for better stability
+                    read_timeout=60,
+                    write_timeout=60,
+                    connect_timeout=60,
+                    pool_timeout=60
+                )
+            except Exception as e:
+                logger.critical(f"Polling thread crashed: {e}")
+                raise
+
+        # Start polling in a daemon thread
+        polling_thread = threading.Thread(target=run_polling, daemon=True)
+        polling_thread.start()
+
+        # Keep main thread alive
+        polling_thread.join()
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
