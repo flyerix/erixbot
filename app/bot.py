@@ -2557,6 +2557,11 @@ async def run_bot_main_loop():
             """Run polling in a separate thread to avoid main thread issues"""
             try:
                 logger.info("Starting polling in separate thread")
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+                # Run polling with the new event loop
                 application.run_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
