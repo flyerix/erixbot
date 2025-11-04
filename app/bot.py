@@ -842,8 +842,6 @@ Cosa vuoi fare con questa lista?
                 user_id=user_id,
                 title=title,
                 description=message_text,
-                category='generale',  # Default category
-                priority='media',     # Default priority
                 status='open'         # Default status
             )
             session.add(ticket)
