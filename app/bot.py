@@ -837,16 +837,12 @@ Cosa vuoi fare con questa lista?
         title = context.user_data.get('ticket_title')
         session = SessionLocal()
         try:
-            # Admin can set category and priority for tickets
-            category = 'generale'
-            priority = 'media'
+            # Create ticket with basic fields only
 
             ticket = Ticket(
                 user_id=user_id,
                 title=title,
-                description=message_text,
-                category=category,
-                priority=priority
+                description=message_text
             )
             session.add(ticket)
             session.commit()
