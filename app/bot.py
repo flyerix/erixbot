@@ -837,12 +837,14 @@ Cosa vuoi fare con questa lista?
         title = context.user_data.get('ticket_title')
         session = SessionLocal()
         try:
-            # Create ticket with basic fields only
-
+            # Create ticket with all required fields
             ticket = Ticket(
                 user_id=user_id,
                 title=title,
-                description=message_text
+                description=message_text,
+                category='generale',  # Default category
+                priority='media',     # Default priority
+                status='open'         # Default status
             )
             session.add(ticket)
             session.commit()
@@ -1418,6 +1420,91 @@ async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup = InlineKeyboardMarkup(feedback_keyboard)
 
             await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\n📝 **Valuta il supporto ricevuto:**\n\nCome valuti l'assistenza che hai ricevuto?", reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def continue_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if ticket:
+            context.user_data['reply_ticket'] = ticket_id
+            await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def close_ticket_user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if ticket:
+            ticket.status = 'closed'
+            session.commit()
+
+            # Ask for feedback
+            feedback_keyboard = [
+                [InlineKeyboardButton("⭐⭐⭐⭐⭐ Eccellente", callback_data=f'feedback:{ticket_id}:5')],
+                [InlineKeyboardButton("⭐⭐⭐⭐ Buono", callback_data=f'feedback:{ticket_id}:4')],
+                [InlineKeyboardButton("⭐⭐⭐ Sufficiente", callback_data=f'feedback:{ticket_id}:3')],
+                [InlineKeyboardButton("⭐⭐ Scarso", callback_data=f'feedback:{ticket_id}:2')],
+                [InlineKeyboardButton("⭐ Molto Scarso", callback_data=f'feedback:{ticket_id}:1')],
+                [InlineKeyboardButton("⏭️ Salta Feedback", callback_data=f'feedback:{ticket_id}:0')]
+            ]
+            reply_markup = InlineKeyboardMarkup(feedback_keyboard)
+
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\n📝 **Valuta il supporto ricevuto:**\n\nCome valuti l'assistenza che hai ricevuto?", reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def escalate_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if ticket:
+            ticket.status = 'escalated'
+            session.commit()
+
+            await query.edit_message_text("📞 **Ticket escalato agli amministratori!**\n\n👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.\n\n💬 Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui.")
+        else:
+            await query.edit_message_text("❌ Ticket non trovato.")
+    finally:
+        session.close()
+
+async def contact_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ticket_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    session = SessionLocal()
+    try:
+        ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+        if ticket:
+            ticket.status = 'escalated'
+            session.commit()
+
+            await query.edit_message_text("📞 **Richiesta di contatto amministratore inviata!**\n\n👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.\n\n💬 Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui.")
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -2420,6 +2507,10 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(view_ticket_callback, pattern='^view_ticket:'))
     application.add_handler(CallbackQueryHandler(reply_ticket_callback, pattern='^reply_ticket:'))
     application.add_handler(CallbackQueryHandler(close_ticket_callback, pattern='^close_ticket:'))
+    application.add_handler(CallbackQueryHandler(continue_ticket_callback, pattern='^continue_ticket:'))
+    application.add_handler(CallbackQueryHandler(close_ticket_user_callback, pattern='^close_ticket_user:'))
+    application.add_handler(CallbackQueryHandler(escalate_ticket_callback, pattern='^escalate_ticket:'))
+    application.add_handler(CallbackQueryHandler(contact_admin_callback, pattern='^contact_admin:'))
     application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
     application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
     application.add_handler(CallbackQueryHandler(select_list_callback, pattern='^select_list:'))
