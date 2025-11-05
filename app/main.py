@@ -1,58 +1,15 @@
-from flask import Flask, jsonify, request
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index
+"""
+Database models for the bot application
+"""
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index, Float
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-import os
-import logging
-import sys
-
-# Configure logging for production
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Environment validation
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    logger.error("DATABASE_URL environment variable is required")
-    raise ValueError("DATABASE_URL environment variable is required")
-
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-if not TELEGRAM_BOT_TOKEN:
-    logger.error("TELEGRAM_BOT_TOKEN environment variable is required")
-    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
-
-# Database configuration optimized for Render
-pool_size = int(os.getenv('DATABASE_POOL_SIZE', '5'))
-max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '10'))
-
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=pool_size,
-    max_overflow=max_overflow,
-    pool_timeout=30,
-    pool_recycle=1800,  # Recycle connections every 30 minutes for Render
-    pool_pre_ping=True,  # Verify connections before use
-    echo=False  # Disable SQL logging in production
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Update models module with SessionLocal
-import models
-models.SessionLocal = SessionLocal
-
-# Flask app for health checks
-app = Flask(__name__)
 
 Base = declarative_base()
+
+# Database session factory - will be initialized in main.py
+SessionLocal = None
 
 class List(Base):
     __tablename__ = 'lists'
@@ -63,6 +20,13 @@ class List(Base):
     expiry_date = Column(DateTime)
     notes = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    category = Column(String, default='generale')  # generale, premium, speciale
+    is_active = Column(Boolean, default=True)
+
+    __table_args__ = (
+        Index('idx_list_expiry', 'expiry_date'),
+        Index('idx_list_category', 'category'),
+    )
 
 class Ticket(Base):
     __tablename__ = 'tickets'
@@ -71,16 +35,23 @@ class Ticket(Base):
     user_id = Column(Integer, index=True)
     title = Column(String)
     description = Column(Text)
-    status = Column(String, default='open')  # open, closed, escalated
+    status = Column(String, default='open')  # open, escalated, closed, resolved
     category = Column(String, default='generale')  # generale, tecnico, pagamento, altro
     priority = Column(String, default='media')  # bassa, media, alta, critica
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    escalated_at = Column(DateTime)
+    resolved_at = Column(DateTime)
+    assigned_admin = Column(Integer)  # admin user_id who is handling this ticket
+    sla_deadline = Column(DateTime)  # Service Level Agreement deadline
     messages = relationship("TicketMessage", back_populates="ticket")
 
     __table_args__ = (
         Index('idx_ticket_user_status', 'user_id', 'status'),
         Index('idx_ticket_created', 'created_at'),
+        Index('idx_ticket_category', 'category'),
+        Index('idx_ticket_priority', 'priority'),
+        Index('idx_ticket_sla', 'sla_deadline'),
     )
 
 class TicketMessage(Base):
@@ -103,9 +74,13 @@ class UserNotification(Base):
     user_id = Column(Integer, index=True)
     list_name = Column(String)
     days_before = Column(Integer)  # 1, 3, or 5 days before expiry
+    notification_type = Column(String, default='expiry')  # expiry, renewal, custom
+    is_active = Column(Boolean, default=True)
+    last_sent = Column(DateTime)
 
     __table_args__ = (
         Index('idx_notification_user_list', 'user_id', 'list_name'),
+        Index('idx_notification_type', 'notification_type'),
     )
 
 class RenewalRequest(Base):
@@ -140,6 +115,7 @@ class UserActivity(Base):
     action = Column(String)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     details = Column(Text)
+    session_id = Column(String)  # for tracking user sessions
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
@@ -165,68 +141,69 @@ class UserBehavior(Base):
     data = Column(Text)  # JSON data about the behavior
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-Base.metadata.create_all(bind=engine)
+class UserProfile(Base):
+    __tablename__ = 'user_profiles'
 
-# Health check endpoint for Render
-@app.route('/health')
-def health_check():
-    """Health check endpoint for Render monitoring"""
-    try:
-        # Test database connection
-        session = SessionLocal()
-        from sqlalchemy import text
-        session.execute(text("SELECT 1"))
-        session.commit()
-        session.close()
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    theme = Column(String, default='light')  # light, dark
+    language = Column(String, default='it')  # it, en
+    timezone = Column(String, default='Europe/Rome')
+    notifications_enabled = Column(Boolean, default=True)
+    reminder_days = Column(String, default='1,3,5')  # comma-separated days before expiry
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-        return jsonify({
-            'status': 'healthy',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'database': 'connected'
-        }), 200
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e),
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }), 500
+class SystemMetrics(Base):
+    __tablename__ = 'system_metrics'
 
-@app.route('/')
-def root():
-    """Root endpoint"""
-    return jsonify({
-        'service': 'ErixCastBot',
-        'status': 'running',
-        'version': '2.0.0'
-    })
+    id = Column(Integer, primary_key=True, index=True)
+    metric_type = Column(String)  # memory, cpu, response_time, etc.
+    value = Column(Float)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    details = Column(Text)  # JSON with additional context
 
-# Import and run bot in a separate thread
-def run_bot():
-    """Run the bot in a separate thread"""
-    try:
-        logger.info("Starting ErixCastBot...")
-        # Import bot modules to ensure they load correctly
-        from bot import main as bot_main
-        bot_main()
-    except Exception as e:
-        logger.error(f"Bot failed to start: {e}")
-        raise
+    __table_args__ = (
+        Index('idx_metrics_type_time', 'metric_type', 'timestamp'),
+    )
 
-# For production deployment (Gunicorn)
-if __name__ != '__main__':
-    # This block runs when imported by Gunicorn
-    import threading
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    logger.info("ErixCastBot started successfully in production mode")
+class FeatureFlag(Base):
+    __tablename__ = 'feature_flags'
 
-if __name__ == '__main__':
-    # For local development only
-    import threading
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    description = Column(Text)
+    is_enabled = Column(Boolean, default=False)
+    rollout_percentage = Column(Float, default=0.0)  # 0.0 to 1.0
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-    port = int(os.environ.get('PORT', 10000))
-    logger.info(f"Starting Flask server on port {port}")
-    app.run(host='0.0.0.0', port=port)
+class Alert(Base):
+    __tablename__ = 'alerts'
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_type = Column(String)  # memory_high, cpu_high, db_error, uptime_down, etc.
+    severity = Column(String, default='warning')  # info, warning, error, critical
+    message = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    resolved_at = Column(DateTime)
+    resolved_by = Column(Integer)  # admin user_id who resolved it
+
+    __table_args__ = (
+        Index('idx_alert_type_active', 'alert_type', 'is_active'),
+        Index('idx_alert_severity', 'severity'),
+    )
+
+# Create all tables
+def create_tables(engine):
+    """Create all database tables"""
+    Base.metadata.create_all(bind=engine)
+
+# Export all models and utilities for imports
+__all__ = [
+    'SessionLocal', 'List', 'Ticket', 'TicketMessage', 'UserNotification',
+    'RenewalRequest', 'TicketFeedback', 'UserActivity', 'AuditLog',
+    'UserBehavior', 'UserProfile', 'SystemMetrics', 'FeatureFlag', 'Alert',
+    'Base', 'create_tables'
+]
