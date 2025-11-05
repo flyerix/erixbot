@@ -308,8 +308,12 @@ def log_user_action(user_id, action, details=None):
         session.commit()
     except Exception as e:
         logger.error(f"Failed to log user activity to database: {e}")
+        # Don't re-raise the exception to avoid breaking the bot flow
     finally:
-        session.close()
+        try:
+            session.close()
+        except:
+            pass
 
 def log_admin_action(admin_id, action, target=None, details=None):
     """Logga le azioni degli admin"""
