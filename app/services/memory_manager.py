@@ -154,6 +154,10 @@ class MemoryManager:
             self.monitor_thread.join(timeout=5)
         logger.info("Memory monitoring stopped")
 
+    def is_monitoring(self) -> bool:
+        """Check if memory monitoring is currently active"""
+        return self.monitoring_active
+
     def force_cleanup(self) -> Dict[str, Any]:
         """Force immediate memory cleanup"""
         logger.info("Forcing memory cleanup...")
