@@ -45,6 +45,10 @@ engine = create_engine(
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Update models module with SessionLocal
+import models
+models.SessionLocal = SessionLocal
+
 # Flask app for health checks
 app = Flask(__name__)
 
