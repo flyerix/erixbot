@@ -602,6 +602,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("👥 User Management", callback_data='admin_users')],
             [InlineKeyboardButton("🔧 System Health", callback_data='admin_health')],
             [InlineKeyboardButton("📋 Audit & Logs", callback_data='admin_audit')],
+            [InlineKeyboardButton("🚨 ALLERT - Messaggio di Massa", callback_data='admin_alert')],
             [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -973,6 +974,95 @@ Cosa vuoi fare con questa lista?
             session.close()
         context.user_data.pop('action', None)
 
+    elif action == 'send_mass_alert':
+        """Handle mass alert message input and send to all users"""
+        admin_id = update.effective_user.id
+
+        if not is_admin(admin_id):
+            await update.message.reply_text("❌ Accesso negato!")
+            return
+
+        user_count = context.user_data.get('alert_user_count', 0)
+        if user_count == 0:
+            await update.message.reply_text("❌ Errore: numero utenti non valido.")
+            context.user_data.pop('action', None)
+            context.user_data.pop('alert_user_count', None)
+            return
+
+        # Get all unique user IDs from database
+        session = SessionLocal()
+        try:
+            # Get unique user IDs from all tables that store user interactions
+            ticket_users = session.query(Ticket.user_id).distinct().all()
+            notification_users = session.query(UserNotification.user_id).distinct().all()
+            activity_users = session.query(UserActivity.user_id).distinct().all()
+
+            # Combine and deduplicate user IDs
+            all_user_ids = set()
+            for users in [ticket_users, notification_users, activity_users]:
+                for user_tuple in users:
+                    all_user_ids.add(user_tuple[0])
+
+            # Remove admin IDs from the list (admins shouldn't receive mass alerts)
+            all_user_ids = all_user_ids - set(ADMIN_IDS)
+
+            if len(all_user_ids) != user_count:
+                await update.message.reply_text("❌ Errore: il numero di utenti è cambiato. Riprova dall'inizio.")
+                context.user_data.pop('action', None)
+                context.user_data.pop('alert_user_count', None)
+                return
+
+            # Send mass alert message
+            alert_message = f"""🚨 **Messaggio dall'Assistenza Tecnica**
+
+{message_text}
+
+---
+📅 {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+"""
+
+            sent_count = 0
+            failed_count = 0
+
+            for user_id in all_user_ids:
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=alert_message,
+                        parse_mode='Markdown'
+                    )
+                    sent_count += 1
+                    logger.info(f"✅ Mass alert sent to user {user_id}")
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"❌ Failed to send mass alert to user {user_id}: {str(e)}")
+
+            # Send completion report to admin
+            report_message = f"""✅ **Allert di Massa Completato**
+
+📊 **Report Invio:**
+• **Messaggi inviati:** {sent_count}
+• **Messaggi falliti:** {failed_count}
+• **Totale destinatari:** {user_count}
+
+💬 **Messaggio inviato:**
+{message_text}
+
+📅 **Data invio:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+"""
+
+            await update.message.reply_text(report_message, parse_mode='Markdown')
+
+            # Log admin action
+            log_admin_action(admin_id, "mass_alert_sent", None, f"Sent to {sent_count} users, failed: {failed_count}")
+
+        finally:
+            session.close()
+
+        # Clear context
+        context.user_data.pop('action', None)
+        context.user_data.pop('alert_user_count', None)
+
     elif action == 'reply_ticket':
         ticket_id = context.user_data.get('reply_ticket')
         if ticket_id:
@@ -1069,28 +1159,48 @@ Cosa vuoi fare con questa lista?
             list_obj = session.query(List).filter(List.id == list_id).first()
             if not list_obj:
                 await update.message.reply_text("❌ Lista non trovata.")
+                context.user_data.pop('action', None)
                 return
 
+            # Validate input based on field type
             if field == 'name':
-                list_obj.name = message_text
+                if not message_text.strip():
+                    await update.message.reply_text("❌ Il nome della lista non può essere vuoto.")
+                    return
+                list_obj.name = message_text.strip()
             elif field == 'cost':
-                list_obj.cost = message_text
+                try:
+                    # Allow various cost formats
+                    cost_value = message_text.strip()
+                    list_obj.cost = cost_value
+                except Exception as e:
+                    await update.message.reply_text("❌ Formato costo non valido.")
+                    return
             elif field == 'expiry':
                 try:
-                    list_obj.expiry_date = datetime.strptime(message_text, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+                    expiry_date = datetime.strptime(message_text.strip(), "%d/%m/%Y").replace(tzinfo=timezone.utc)
+                    list_obj.expiry_date = expiry_date
                 except ValueError:
-                    await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY")
+                    await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)")
                     return
             elif field == 'notes':
-                list_obj.notes = message_text if message_text.lower() != 'nessuna' else None
+                list_obj.notes = message_text.strip() if message_text.lower() != 'nessuna' else None
 
             session.commit()
+
+            # Log the successful edit
+            log_admin_action(update.effective_user.id, "edit_list_field", list_obj.name, f"Field: {field}, New value: {message_text}")
+
             await update.message.reply_text(f"✅ Campo **{field}** aggiornato con successo!")
+
+            # Clear the action context
+            context.user_data.pop('action', None)
+
+        except Exception as e:
+            logger.error(f"Error editing list field {field} for list {list_id}: {str(e)}")
+            await update.message.reply_text("❌ Si è verificato un errore durante l'aggiornamento. Riprova più tardi.")
         finally:
             session.close()
-        context.user_data.pop('action', None)
-        context.user_data.pop('edit_field', None)
-        context.user_data.pop('edit_list_id', None)
 
 async def get_ai_response(problem_description, is_followup=False, ticket_id=None, user_id=None):
     try:
@@ -1840,8 +1950,8 @@ async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text("❌ Accesso negato!")
         return
 
-    context.user_data['edit_field'] = field
-    context.user_data['edit_list_id'] = list_id
+    # Set the action in the correct format expected by handle_message
+    context.user_data['action'] = f'edit_field:{field}:{list_id}'
 
     field_names = {
         'name': 'nome',
