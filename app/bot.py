@@ -2518,10 +2518,11 @@ async def admin_users_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         avg_tickets_per_user = total_tickets / total_users if total_users > 0 else 0
 
         # Top users by ticket count
+        from sqlalchemy import func
         top_users = session.query(
             Ticket.user_id,
-            Ticket.func.count(Ticket.id).label('ticket_count')
-        ).group_by(Ticket.user_id).order_by(Ticket.func.count(Ticket.id).desc()).limit(5).all()
+            func.count(Ticket.id).label('ticket_count')
+        ).group_by(Ticket.user_id).order_by(func.count(Ticket.id).desc()).limit(5).all()
 
         users_text = f"""
 👥 **User Management Dashboard**
