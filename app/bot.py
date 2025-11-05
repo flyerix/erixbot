@@ -756,6 +756,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"📨 Message received from user {user_id}: '{message_text}' (action: {action})")
 
+    # Check if admin is in contact mode
+    if is_admin(user_id) and context.user_data.get('contact_user_ticket'):
+        await handle_admin_contact_message(update, context)
+        return
+
     # Check if this is a reply to a ticket
     if update.message.reply_to_message and not action:
         # This is a reply to a ticket message
@@ -868,6 +873,30 @@ Cosa vuoi fare con questa lista?
                     parse_mode='Markdown'
                 )
 
+                # Notify all admins about the escalated ticket
+                escalation_notification = f"""🚨 **Nuovo Ticket Escalato**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {user_id}
+📝 **Titolo:** {title}
+📄 **Descrizione:** {message_text}
+📅 **Data:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+
+🤖 **Motivo Escalation:** AI non in grado di risolvere
+
+🔍 Vai al pannello admin per gestire questo ticket."""
+
+                for admin_id in ADMIN_IDS:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=admin_id,
+                            text=escalation_notification,
+                            parse_mode='Markdown'
+                        )
+                        logger.info(f"✅ Escalation notification sent to admin {admin_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
                 # Log escalation
                 log_ticket_event(ticket.id, "escalated_to_admin", user_id, "AI could not resolve")
         finally:
@@ -934,6 +963,92 @@ Cosa vuoi fare con questa lista?
         finally:
             session.close()
         context.user_data.pop('action', None)
+
+    elif action == 'reply_ticket':
+        ticket_id = context.user_data.get('reply_ticket')
+        if ticket_id:
+            session = SessionLocal()
+            try:
+                # Verify the ticket belongs to this user
+                ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
+                if not ticket:
+                    await update.message.reply_text("❌ Ticket non trovato o non autorizzato.")
+                    context.user_data.pop('reply_ticket', None)
+                    return
+
+                # Add the user reply to the ticket
+                user_message = TicketMessage(
+                    ticket_id=ticket_id,
+                    user_id=user_id,
+                    message=message_text,
+                    is_admin=False,
+                    is_ai=False
+                )
+                session.add(user_message)
+
+                # Try AI response first for the follow-up
+                if message_text:
+                    ai_response = ai_service.get_ai_response(message_text, is_followup=True, ticket_id=ticket_id, user_id=user_id)
+                else:
+                    ai_response = None
+
+                if ai_response:
+                    ai_message = TicketMessage(
+                        ticket_id=ticket_id,
+                        user_id=0,
+                        message=ai_response,
+                        is_admin=False,
+                        is_ai=True
+                    )
+                    session.add(ai_message)
+                    session.commit()
+
+                    await update.message.reply_text(f"💬 **Risposta aggiunta al ticket #{ticket_id}!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\n💬 **Questa conversazione rimane aperta!**\n\nPuoi continuare a scrivere messaggi qui per ricevere altre risposte dall'AI, oppure scegliere un'opzione dal menu ticket:")
+
+                    # Log follow-up
+                    log_ticket_event(ticket_id, "user_followup_with_ai", user_id, f"AI Response: {len(ai_response)} chars")
+                else:
+                    # Escalate to admin
+                    ticket.status = 'escalated'
+                    session.commit()
+
+                    await update.message.reply_text(f"💬 **Risposta aggiunta al ticket #{ticket_id}!**\n\nIl tuo problema richiede assistenza umana. Un admin ti contatterà presto! 👨‍💼")
+
+                    # Notify all admins about the escalated ticket
+                    escalation_notification = f"""🚨 **Ticket Escalato - Follow-up**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {user_id}
+📝 **Titolo:** {ticket.title}
+💬 **Ultimo Messaggio:** {message_text}
+📅 **Data Escalation:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+
+🤖 **Motivo Escalation:** AI non in grado di risolvere follow-up
+
+🔍 Vai al pannello admin per gestire questo ticket."""
+
+                    for admin_id in ADMIN_IDS:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=admin_id,
+                                text=escalation_notification,
+                                parse_mode='Markdown'
+                            )
+                            logger.info(f"✅ Escalation notification sent to admin {admin_id}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
+                    # Log escalation
+                    log_ticket_event(ticket_id, "user_followup_escalated", user_id, "AI could not resolve follow-up")
+
+            except Exception as e:
+                logger.error(f"Error handling ticket reply for user {user_id}: {str(e)}")
+                await update.message.reply_text("❌ Si è verificato un errore nell'invio della risposta. Riprova più tardi.")
+            finally:
+                session.close()
+
+        context.user_data.pop('action', None)
+        context.user_data.pop('reply_ticket', None)
 
     elif action and action.startswith('edit_field:'):
         parts = action.split(':')
@@ -1358,6 +1473,30 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             await update.message.reply_text(f"💬 **Risposta aggiunta al ticket #{ticket_id}!**\n\nIl tuo problema richiede assistenza umana. Un admin ti contatterà presto! 👨‍💼")
 
+            # Notify all admins about the escalated ticket
+            escalation_notification = f"""🚨 **Ticket Escalato - Follow-up**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {user_id}
+📝 **Titolo:** {ticket.title}
+💬 **Ultimo Messaggio:** {message_text}
+📅 **Data Escalation:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+
+🤖 **Motivo Escalation:** AI non in grado di risolvere follow-up
+
+🔍 Vai al pannello admin per gestire questo ticket."""
+
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=escalation_notification,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Escalation notification sent to admin {admin_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
             # Log escalation
             log_ticket_event(ticket_id, "user_followup_escalated", user_id, "AI could not resolve follow-up")
 
@@ -1436,6 +1575,31 @@ async def escalate_ticket_callback(update: Update, context: ContextTypes.DEFAULT
             session.commit()
 
             await query.edit_message_text("📞 **Ticket escalato agli amministratori!**\n\n👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.\n\n💬 Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui.")
+
+            # Notify all admins about the escalated ticket
+            escalation_notification = f"""🚨 **Ticket Escalato dall'Utente**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {user_id}
+📝 **Titolo:** {ticket.title}
+📄 **Descrizione:** {ticket.description}
+📅 **Data Escalation:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+
+👤 **Motivo Escalation:** Richiesta diretta dell'utente
+
+🔍 Vai al pannello admin per gestire questo ticket."""
+
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=escalation_notification,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Escalation notification sent to admin {admin_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -1455,6 +1619,31 @@ async def contact_admin_callback(update: Update, context: ContextTypes.DEFAULT_T
             session.commit()
 
             await query.edit_message_text("📞 **Richiesta di contatto amministratore inviata!**\n\n👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.\n\n💬 Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui.")
+
+            # Notify all admins about the escalated ticket
+            escalation_notification = f"""🚨 **Richiesta Contatto Admin**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {user_id}
+📝 **Titolo:** {ticket.title}
+📄 **Descrizione:** {ticket.description}
+📅 **Data Richiesta:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
+
+👤 **Motivo Escalation:** Richiesta diretta dell'utente
+
+🔍 Vai al pannello admin per gestire questo ticket."""
+
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=escalation_notification,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"✅ Escalation notification sent to admin {admin_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -1826,7 +2015,7 @@ async def admin_contact_user_callback(update: Update, context: ContextTypes.DEFA
         context.user_data['contact_user_ticket'] = ticket_id
         context.user_data['contact_user_id'] = ticket.user_id
 
-        await query.edit_message_text(f"📞 **Contatto diretto con User {ticket.user_id}**\n\nScrivi il messaggio che vuoi inviare all'utente per il ticket #{ticket_id}.\n\nIl messaggio verrà inviato direttamente alla chat privata dell'utente.")
+        await query.edit_message_text(f"📞 **Contatto diretto con User {ticket.user_id}**\n\nScrivi il messaggio che vuoi inviare all'utente per il ticket #{ticket_id}.\n\nIl messaggio verrà inviato direttamente alla chat privata dell'utente.\n\n💡 **Per terminare il contatto diretto, usa /stop_contact**")
 
         # Log admin action
         log_admin_action(admin_id, "initiate_user_contact", ticket.user_id, f"Ticket: {ticket_id}")
@@ -1890,9 +2079,9 @@ async def handle_admin_contact_message(update: Update, context: ContextTypes.DEF
         finally:
             session.close()
 
-        # Clear contact context
-        context.user_data.pop('contact_user_ticket', None)
-        context.user_data.pop('contact_user_id', None)
+        # Clear contact context - DON'T clear here, let admin send multiple messages
+        # context.user_data.pop('contact_user_ticket', None)
+        # context.user_data.pop('contact_user_id', None)
 
     except Exception as e:
         logger.error(f"Error sending contact message from admin {admin_id} to user {user_id}: {str(e)}")
@@ -2429,6 +2618,24 @@ async def run_bot_main_loop():
 
         await update.message.reply_text("🎫 **Supporto Tecnico**\n\nCome possiamo aiutarti?", reply_markup=reply_markup, parse_mode='Markdown')
 
+    async def stop_contact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Stop direct contact with user"""
+        admin_id = update.effective_user.id
+
+        if not is_admin(admin_id):
+            await update.message.reply_text("❌ Questo comando è riservato agli amministratori.")
+            return
+
+        # Clear contact context
+        ticket_id = context.user_data.pop('contact_user_ticket', None)
+        user_id = context.user_data.pop('contact_user_id', None)
+
+        if ticket_id and user_id:
+            await update.message.reply_text(f"✅ Contatto diretto terminato per il ticket #{ticket_id} con l'utente {user_id}.")
+            log_admin_action(admin_id, "stop_user_contact", user_id, f"Ticket: {ticket_id}")
+        else:
+            await update.message.reply_text("ℹ️ Non sei attualmente in contatto diretto con nessun utente.")
+
     # Register all handlers with logging
     logger.info("📝 Registering command handlers...")
     application.add_handler(CommandHandler("start", start))
@@ -2437,6 +2644,7 @@ async def run_bot_main_loop():
     application.add_handler(CommandHandler("dashboard", dashboard_command))
     application.add_handler(CommandHandler("renew", renew_command))
     application.add_handler(CommandHandler("support", support_command))
+    application.add_handler(CommandHandler("stop_contact", stop_contact_command))
 
     logger.info("📝 Registering message handlers...")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
