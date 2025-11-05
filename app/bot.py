@@ -2795,11 +2795,11 @@ async def run_bot_main_loop():
 
     # Additional stability check - verify database connection before starting
     try:
-        from models import SessionLocal, engine
-        # Test database connection
-        with engine.connect() as conn:
-            from sqlalchemy import text
-            conn.execute(text("SELECT 1"))
+        # Test database connection using SessionLocal
+        session = SessionLocal()
+        from sqlalchemy import text
+        session.execute(text("SELECT 1"))
+        session.close()
         logger.info("✅ Database connection verified")
     except Exception as db_e:
         logger.error(f"💥 Database connection failed: {db_e}")
