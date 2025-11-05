@@ -36,22 +36,22 @@ class Ticket(Base):
     title = Column(String)
     description = Column(Text)
     status = Column(String, default='open')  # open, escalated, closed, resolved
-    category = Column(String, default='generale')  # generale, tecnico, pagamento, altro
-    priority = Column(String, default='media')  # bassa, media, alta, critica
+    # category = Column(String, default='generale')  # generale, tecnico, pagamento, altro - removed for compatibility
+    # priority = Column(String, default='media')  # bassa, media, alta, critica - removed for compatibility
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    escalated_at = Column(DateTime)
-    resolved_at = Column(DateTime)
-    assigned_admin = Column(Integer)  # admin user_id who is handling this ticket
-    sla_deadline = Column(DateTime)  # Service Level Agreement deadline
+    # escalated_at = Column(DateTime) - removed for compatibility
+    # resolved_at = Column(DateTime) - removed for compatibility
+    # assigned_admin = Column(Integer)  # admin user_id who is handling this ticket - removed for compatibility
+    # sla_deadline = Column(DateTime)  # Service Level Agreement deadline - removed for compatibility
     messages = relationship("TicketMessage", back_populates="ticket")
 
     __table_args__ = (
         Index('idx_ticket_user_status', 'user_id', 'status'),
         Index('idx_ticket_created', 'created_at'),
-        Index('idx_ticket_category', 'category'),
-        Index('idx_ticket_priority', 'priority'),
-        Index('idx_ticket_sla', 'sla_deadline'),
+        # Index('idx_ticket_category', 'category'),  # removed for compatibility
+        # Index('idx_ticket_priority', 'priority'),  # removed for compatibility
+        # Index('idx_ticket_sla', 'sla_deadline'),  # removed for compatibility
     )
 
 class TicketMessage(Base):
