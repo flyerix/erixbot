@@ -664,6 +664,75 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             session.close()
 
+    elif data == 'admin_alert':
+        if not is_admin(user_id):
+            await query.edit_message_text("❌ Accesso negato! Solo gli admin possono accedere.")
+            return
+
+        # Get user count for confirmation
+        session = SessionLocal()
+        try:
+            # Get unique user IDs from all tables that store user interactions
+            ticket_users = session.query(Ticket.user_id).distinct().all()
+            notification_users = session.query(UserNotification.user_id).distinct().all()
+            activity_users = session.query(UserActivity.user_id).distinct().all()
+
+            # Combine and deduplicate user IDs
+            all_user_ids = set()
+            for users in [ticket_users, notification_users, activity_users]:
+                for user_tuple in users:
+                    all_user_ids.add(user_tuple[0])
+
+            # Remove admin IDs from the list (admins shouldn't receive mass alerts)
+            all_user_ids = all_user_ids - set(ADMIN_IDS)
+            user_count = len(all_user_ids)
+
+            if user_count == 0:
+                keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text("🚨 **Allert di Massa**\n\n❌ Nessun utente trovato nel database.", reply_markup=reply_markup)
+                return
+
+            # Store user count for confirmation
+            context.user_data['alert_user_count'] = user_count
+
+            keyboard = [
+                [InlineKeyboardButton("✅ Procedi", callback_data='confirm_mass_alert')],
+                [InlineKeyboardButton("❌ Annulla", callback_data='admin_panel')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                f"🚨 **Allert di Massa - Conferma**\n\n"
+                f"📊 **Destinatari:** {user_count} utenti\n\n"
+                f"⚠️ **Attenzione:** Questo messaggio verrà inviato a tutti gli utenti attivi.\n"
+                f"L'operazione non può essere annullata.\n\n"
+                f"Vuoi procedere?",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+
+        finally:
+            session.close()
+
+    elif data == 'confirm_mass_alert':
+        if not is_admin(user_id):
+            await query.edit_message_text("❌ Accesso negato!")
+            return
+
+        user_count = context.user_data.get('alert_user_count', 0)
+        if user_count == 0:
+            await query.edit_message_text("❌ Errore: numero utenti non valido.")
+            return
+
+        await query.edit_message_text(
+            f"📝 **Scrivi il messaggio di allert**\n\n"
+            f"📊 Verrà inviato a **{user_count} utenti**\n\n"
+            f"Scrivi il messaggio che vuoi inviare:",
+            parse_mode='Markdown'
+        )
+        context.user_data['action'] = 'send_mass_alert'
+
     elif data == 'admin_renewals':
         logger.info(f"Admin {user_id} accessed renewal requests")
         try:
@@ -3119,7 +3188,7 @@ async def run_bot_main_loop():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
     logger.info("📝 Registering callback query handlers...")
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats)$'))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
