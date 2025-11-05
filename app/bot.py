@@ -589,9 +589,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Accesso negato! Solo gli admin possono accedere.")
             return
         keyboard = [
+            [InlineKeyboardButton("📋 Gestisci Liste", callback_data='admin_lists')],
+            [InlineKeyboardButton("🎫 Ticket Management", callback_data='admin_tickets')],
+            [InlineKeyboardButton("🔄 Richieste Rinnovo", callback_data='admin_renewals')],
             [InlineKeyboardButton("📊 Analytics & Metrics", callback_data='admin_analytics')],
             [InlineKeyboardButton("📈 Performance Monitor", callback_data='admin_performance')],
-            [InlineKeyboardButton("🎫 Ticket Management", callback_data='admin_tickets')],
             [InlineKeyboardButton("💰 Revenue & Renewals", callback_data='admin_revenue')],
             [InlineKeyboardButton("👥 User Management", callback_data='admin_users')],
             [InlineKeyboardButton("🔧 System Health", callback_data='admin_health')],
@@ -3032,7 +3034,12 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
     application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern='^admin_stats$'))
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_analytics|admin_performance|admin_revenue|admin_users|admin_health|admin_audit)$'))
+    application.add_handler(CallbackQueryHandler(admin_analytics_callback, pattern='^admin_analytics$'))
+    application.add_handler(CallbackQueryHandler(admin_performance_callback, pattern='^admin_performance$'))
+    application.add_handler(CallbackQueryHandler(admin_revenue_callback, pattern='^admin_revenue$'))
+    application.add_handler(CallbackQueryHandler(admin_users_callback, pattern='^admin_users$'))
+    application.add_handler(CallbackQueryHandler(admin_health_callback, pattern='^admin_health$'))
+    application.add_handler(CallbackQueryHandler(admin_audit_callback, pattern='^admin_audit$'))
     application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
     application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
     application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
