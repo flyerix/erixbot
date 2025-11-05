@@ -4,10 +4,12 @@ Database models for the bot application
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from datetime import datetime, timezone
 
 Base = declarative_base()
+
+# Database session factory - will be initialized in main.py
+SessionLocal = None
 
 class List(Base):
     __tablename__ = 'lists'
@@ -18,8 +20,8 @@ class List(Base):
     expiry_date = Column(DateTime)
     notes = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    category = Column(String, default='generale')  # generale, premium, speciale
-    is_active = Column(Boolean, default=True)
+    # category = Column(String, default='generale')  # generale, premium, speciale - removed for compatibility
+    # is_active = Column(Boolean, default=True) - removed for compatibility
 
     __table_args__ = (
         Index('idx_list_expiry', 'expiry_date'),
@@ -72,9 +74,9 @@ class UserNotification(Base):
     user_id = Column(Integer, index=True)
     list_name = Column(String)
     days_before = Column(Integer)  # 1, 3, or 5 days before expiry
-    notification_type = Column(String, default='expiry')  # expiry, renewal, custom
-    is_active = Column(Boolean, default=True)
-    last_sent = Column(DateTime)
+    # notification_type = Column(String, default='expiry')  # expiry, renewal, custom - removed for compatibility
+    # is_active = Column(Boolean, default=True) - removed for compatibility
+    # last_sent = Column(DateTime) - removed for compatibility
 
     __table_args__ = (
         Index('idx_notification_user_list', 'user_id', 'list_name'),
@@ -113,7 +115,7 @@ class UserActivity(Base):
     action = Column(String)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     details = Column(Text)
-    session_id = Column(String)  # for tracking user sessions
+    # session_id = Column(String)  # for tracking user sessions - removed for compatibility
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
