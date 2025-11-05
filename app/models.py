@@ -25,7 +25,7 @@ class List(Base):
 
     __table_args__ = (
         Index('idx_list_expiry', 'expiry_date'),
-        Index('idx_list_category', 'category'),
+        # Index('idx_list_category', 'category'),  # removed for compatibility
     )
 
 class Ticket(Base):
@@ -80,7 +80,7 @@ class UserNotification(Base):
 
     __table_args__ = (
         Index('idx_notification_user_list', 'user_id', 'list_name'),
-        Index('idx_notification_type', 'notification_type'),
+        # Index('idx_notification_type', 'notification_type'),  # removed for compatibility
     )
 
 class RenewalRequest(Base):
