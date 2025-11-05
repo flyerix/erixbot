@@ -202,6 +202,7 @@ def run_bot():
     """Run the bot in a separate thread"""
     try:
         logger.info("Starting ErixCastBot...")
+        # Import bot modules to ensure they load correctly
         from bot import main as bot_main
         bot_main()
     except Exception as e:
