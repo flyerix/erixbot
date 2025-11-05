@@ -197,3 +197,11 @@ class Alert(Base):
 def create_tables(engine):
     """Create all database tables"""
     Base.metadata.create_all(bind=engine)
+
+# Export all models and utilities for imports
+__all__ = [
+    'SessionLocal', 'List', 'Ticket', 'TicketMessage', 'UserNotification',
+    'RenewalRequest', 'TicketFeedback', 'UserActivity', 'AuditLog',
+    'UserBehavior', 'UserProfile', 'SystemMetrics', 'FeatureFlag', 'Alert',
+    'Base', 'create_tables'
+]
