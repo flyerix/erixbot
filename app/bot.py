@@ -2422,7 +2422,7 @@ async def admin_performance_callback(update: Update, context: ContextTypes.DEFAU
 
 🔄 **Background Tasks:**
 • Scheduler Status: {'✅ Active' if scheduler.running else '❌ Inactive'}
-• Memory Cleanup: {'✅ Active' if memory_manager.is_monitoring() else '❌ Inactive'}
+• Memory Monitor: {'✅ Active' if memory_manager.monitoring_active else '❌ Inactive'}
 • Backup System: ✅ Active
 
 📊 **Response Times:**
