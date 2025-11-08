@@ -895,23 +895,42 @@ Cosa vuoi fare con questa lista?
     elif action == 'ticket_description':
         title = context.user_data.get('ticket_title')
         session = SessionLocal()
+        ticket = None
         try:
+            # Validate input
+            if not title or not message_text:
+                await update.message.reply_text("❌ Titolo e descrizione del ticket sono obbligatori.")
+                return
+
+            # Sanitize input
+            title = sanitize_text(title, 200)
+            description = sanitize_text(message_text, 2000)
+
+            if not title or not description:
+                await update.message.reply_text("❌ Input non valido. Riprova con testo diverso.")
+                return
+
             # Create ticket with all required fields
             ticket = Ticket(
                 user_id=user_id,
                 title=title,
-                description=message_text
+                description=description
             )
             session.add(ticket)
             session.commit()
 
-            # Try AI response first with context awareness
-            if message_text:
-                ai_response = ai_service.get_ai_response(message_text, is_followup=False, ticket_id=int(ticket.id), user_id=user_id)
-            else:
-                ai_response = None
-            ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=message_text)
+            # Add user message
+            ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=description)
             session.add(ticket_message)
+
+            # Try AI response first with context awareness
+            ai_response = None
+            try:
+                if description:
+                    ai_response = ai_service.get_ai_response(description, is_followup=False, ticket_id=int(ticket.id), user_id=user_id)
+            except Exception as ai_e:
+                logger.warning(f"AI service failed for ticket {ticket.id}: {ai_e}")
+                ai_response = None
 
             if ai_response:
                 ai_message = TicketMessage(ticket_id=ticket.id, user_id=0, message=ai_response, is_ai=True)
@@ -952,18 +971,21 @@ Cosa vuoi fare con questa lista?
                     parse_mode='Markdown'
                 )
 
-                # Notify all admins about the escalated ticket
+                # Notify all admins about the escalated ticket with retry logic
                 escalation_notification = f"""🚨 **Nuovo Ticket Escalato**
 
 🎫 **Ticket ID:** #{ticket.id}
 👤 **User ID:** {user_id}
 📝 **Titolo:** {title}
-📄 **Descrizione:** {message_text}
+📄 **Descrizione:** {description}
 📅 **Data:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
 
 🤖 **Motivo Escalation:** AI non in grado di risolvere
 
 🔍 Vai al pannello admin per gestire questo ticket."""
+
+                admin_notifications_sent = 0
+                admin_notifications_failed = 0
 
                 for admin_id in ADMIN_IDS:
                     try:
@@ -972,14 +994,32 @@ Cosa vuoi fare con questa lista?
                             text=escalation_notification,
                             parse_mode='Markdown'
                         )
+                        admin_notifications_sent += 1
                         logger.info(f"✅ Escalation notification sent to admin {admin_id}")
                     except Exception as e:
+                        admin_notifications_failed += 1
                         logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
 
+                if admin_notifications_failed > 0:
+                    logger.warning(f"⚠️ Failed to notify {admin_notifications_failed} out of {len(ADMIN_IDS)} admins about ticket {ticket.id}")
+
                 # Log escalation
-                log_ticket_event(ticket.id, "escalated_to_admin", user_id, "AI could not resolve")
+                log_ticket_event(ticket.id, "escalated_to_admin", user_id, f"AI could not resolve. Admins notified: {admin_notifications_sent}/{len(ADMIN_IDS)}")
+
+        except Exception as e:
+            logger.error(f"❌ Error creating ticket for user {user_id}: {str(e)}")
+            if ticket:
+                try:
+                    session.rollback()
+                except:
+                    pass
+            await update.message.reply_text("❌ Si è verificato un errore nella creazione del ticket. Riprova più tardi.")
         finally:
-            session.close()
+            try:
+                session.close()
+            except:
+                pass
+
         context.user_data.pop('action', None)
         context.user_data.pop('ticket_title', None)
 
@@ -1415,8 +1455,14 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
     user_id = query.from_user.id
     cost = months * 15
 
+    # Validate input
+    if not list_name or months <= 0:
+        await query.edit_message_text("❌ Dati di rinnovo non validi.")
+        return
+
     # Create renewal request in database
     session = SessionLocal()
+    renewal_request = None
     try:
         renewal_request = RenewalRequest(
             user_id=user_id,
@@ -1433,7 +1479,7 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
         # Notify user
         await query.edit_message_text(f"✅ Richiesta di rinnovo inviata!\n\n📋 Lista: {list_name}\n⏰ Durata: {months} mesi\n💰 Costo: €{cost}\n👤 User ID: {user_id}\n\nGli admin riceveranno la notifica per l'approvazione. 🎉")
 
-        # Notify all admins
+        # Notify all admins with retry logic
         admin_notification = f"""🚨 **Nuova Richiesta di Rinnovo**
 
 👤 **User ID:** {user_id}
@@ -1444,6 +1490,9 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 🔍 Vai al pannello admin per gestire questa richiesta."""
 
+        admin_notifications_sent = 0
+        admin_notifications_failed = 0
+
         for admin_id in ADMIN_IDS:
             try:
                 await context.bot.send_message(
@@ -1451,14 +1500,31 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
                     text=admin_notification,
                     parse_mode='Markdown'
                 )
+                admin_notifications_sent += 1
+                logger.info(f"✅ Renewal notification sent to admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to notify admin {admin_id}: {str(e)}")
+                admin_notifications_failed += 1
+                logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
+        if admin_notifications_failed > 0:
+            logger.warning(f"⚠️ Failed to notify {admin_notifications_failed} out of {len(ADMIN_IDS)} admins about renewal request {renewal_request.id}")
+
+        # Log admin notifications
+        log_user_action(user_id, "renewal_request_admin_notified", f"Admins notified: {admin_notifications_sent}/{len(ADMIN_IDS)}")
 
     except Exception as e:
-        logger.error(f"Error creating renewal request for user {user_id}: {str(e)}")
+        logger.error(f"❌ Error creating renewal request for user {user_id}: {str(e)}")
+        if renewal_request:
+            try:
+                session.rollback()
+            except:
+                pass
         await query.edit_message_text("❌ Si è verificato un errore nell'invio della richiesta. Riprova più tardi.")
     finally:
-        session.close()
+        try:
+            session.close()
+        except:
+            pass
 
     context.user_data.pop('renew_list', None)
     context.user_data.pop('renew_months', None)
