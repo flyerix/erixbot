@@ -285,8 +285,14 @@ def get_user_language(user_id):
     session = SessionLocal()
     try:
         from models import UserProfile
-        profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
-        return profile.language if profile else 'it'
+        # Verifica se la tabella esiste prima di fare la query
+        try:
+            profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+            return profile.language if profile else 'it'
+        except Exception as e:
+            # Se la tabella non esiste, restituisci il default
+            logger.warning(f"UserProfile table not found, using default language: {e}")
+            return 'it'
     finally:
         session.close()
 
