@@ -676,7 +676,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(localization.get_text('ticket.menu_title', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(localization.get_text('ticket.menu_title', user_lang), reply_markup=reply_markup)
 
     elif data == 'user_stats':
         session = SessionLocal()
