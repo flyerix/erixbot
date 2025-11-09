@@ -25,7 +25,7 @@
     "cancel": "❌ Annulla"
   },
   "ticket": {
-    "menu_title": "🎫 Menu Ticket",
+    "menu_title": "🎫 Menu Ticket\n\nCosa vuoi fare?",
     "menu_subtitle": "Cosa vuoi fare?",
     "created": "🎫 Ticket #{id} creato!",
     "ai_response": "🤖 Risposta AI:",
