@@ -33,7 +33,16 @@
     "escalated": "👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.",
     "closed": "✅ Ticket chiuso con successo!",
     "reply_added": "💬 Risposta aggiunta al ticket #{id}!",
-    "escalated_followup": "Il tuo problema richiede assistenza umana. Un admin ti contatterà presto!"
+    "escalated_followup": "Il tuo problema richiede assistenza umana. Un admin ti contatterà presto!",
+    "ai_unable": "🤖 L'AI non è in grado di risolvere questo problema.",
+    "admin_contact": "👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.",
+    "add_details": "📝 Puoi aggiungere altri dettagli al ticket scrivendo messaggi qui.",
+    "enter_title": "📝 Inserisci il titolo del tuo problema:",
+    "describe_problem": "📝 Descrivi il problema in dettaglio:",
+    "enter_reply": "💬 Scrivi la tua risposta al ticket:",
+    "details": "🎫 **Dettagli Ticket #{id}**\n📝 Titolo: {title}\n📄 Descrizione: {description}\n📊 Stato: {status}\n👤 User: {user_id}\n\n💬 **Messaggi:**",
+    "messages": "Messaggi del Ticket",
+    "summary": "Riepilogo Conversazione"
   },
   "help": {
     "title": "❓ Guida Completa del Bot",
