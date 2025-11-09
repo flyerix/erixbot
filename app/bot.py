@@ -15,6 +15,7 @@ from utils.metrics import metrics_collector
 from services.ai_services import ai_service
 from services.task_manager import task_manager
 from services.memory_manager import memory_manager
+from locales import localization
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import signal
@@ -279,6 +280,16 @@ def is_admin(user_id):
 def get_user_prefix(user_id):
     return "👑 Admin" if is_admin(user_id) else "👤 User"
 
+def get_user_language(user_id):
+    """Ottieni la lingua dell'utente dal profilo"""
+    session = SessionLocal()
+    try:
+        from models import UserProfile
+        profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+        return profile.language if profile else 'it'
+    finally:
+        session.close()
+
 # Funzioni di logging avanzato
 def check_rate_limit(user_id, action='general'):
     """Check if user is within rate limits using enhanced rate limiter"""
@@ -350,7 +361,7 @@ def log_list_event(list_name, event, user_id=None, details=None):
 
 # Sistema notifiche intelligente
 async def send_expiry_notifications():
-    """Invia notifiche per scadenze imminenti"""
+    """Invia notifiche per scadenze imminenti con supporto multilingua"""
     try:
         session = SessionLocal()
         now = datetime.now(timezone.utc)
@@ -367,17 +378,17 @@ async def send_expiry_notifications():
                 # Invia notifica se siamo nel periodo specificato
                 if days_until == notif.days_before and days_until >= 0:
                     try:
-                        message = f"""
-🔔 **Promemoria Scadenza Lista**
+                        user_lang = get_user_language(notif.user_id)
+                        message = f"""{localization.get_text('notification.expiry_reminder', user_lang)}
 
-📋 **Lista:** {lst.name}
-💰 **Costo:** {lst.cost}
-📅 **Scade tra:** {days_until} giorni
-📆 **Data scadenza:** {lst.expiry_date.strftime('%d/%m/%Y')}
+{localization.get_text('notification.list_name', user_lang, name=lst.name)}
+{localization.get_text('notification.cost', user_lang, cost=lst.cost)}
+{localization.get_text('notification.days_until', user_lang, days=days_until)}
+{localization.get_text('notification.expiry_date', user_lang, date=lst.expiry_date.strftime('%d/%m/%Y'))}
 
-⚡ Rinnova ora per evitare interruzioni!
+{localization.get_text('notification.renew_now', user_lang)}
 
-💬 Usa /renew per rinnovare velocemente
+{localization.get_text('notification.use_renew', user_lang)}
                         """
 
                         # Try to send direct message to user
@@ -396,6 +407,52 @@ async def send_expiry_notifications():
 
     except Exception as e:
         logger.error(f"NOTIFICATIONS_SYSTEM_ERROR - {str(e)}")
+    finally:
+        session.close()
+
+async def send_custom_reminders():
+    """Invia promemoria personalizzati basati sui comportamenti utente"""
+    try:
+        session = SessionLocal()
+        now = datetime.now(timezone.utc)
+
+        # Trova utenti che potrebbero aver bisogno di promemoria
+        # Utenti che non interagiscono da più di 7 giorni ma hanno liste attive
+        inactive_users = session.query(UserActivity.user_id).filter(
+            UserActivity.timestamp < now - timedelta(days=7)
+        ).distinct().all()
+
+        reminders_sent = 0
+        for user_tuple in inactive_users:
+            user_id = user_tuple[0]
+            user_lang = get_user_language(user_id)
+
+            # Controlla se ha liste attive
+            active_lists = session.query(List).filter(
+                List.expiry_date > now
+            ).all()
+
+            if active_lists:
+                try:
+                    reminder_message = f"""{localization.get_text('reminder.inactive_user', user_lang)}
+
+{localization.get_text('reminder.active_lists', user_lang, count=len(active_lists))}
+
+{localization.get_text('reminder.check_status', user_lang)}
+{localization.get_text('reminder.contact_support', user_lang)}
+                    """
+
+                    # Invia promemoria
+                    logger.info(f"CUSTOM_REMINDER_SENT - User: {user_id}, Active lists: {len(active_lists)}")
+                    reminders_sent += 1
+
+                except Exception as e:
+                    logger.error(f"CUSTOM_REMINDER_ERROR - User: {user_id}, Error: {str(e)}")
+
+        logger.info(f"CUSTOM_REMINDERS_COMPLETED - Total sent: {reminders_sent}")
+
+    except Exception as e:
+        logger.error(f"CUSTOM_REMINDERS_SYSTEM_ERROR - {str(e)}")
     finally:
         session.close()
 
@@ -486,13 +543,15 @@ async def create_backup():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    user_lang = get_user_language(user_id)
 
     logger.info(f"👋 User {user_id} started the bot")
 
     # Check rate limit
     if not check_rate_limit(user_id, 'send_message'):
         logger.warning(f"⚠️ Rate limit exceeded for user {user_id}")
-        await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+        error_msg = localization.get_text('errors.rate_limit', user_lang)
+        await update.message.reply_text(error_msg, parse_mode='Markdown')
         return
 
     prefix = get_user_prefix(user_id)
@@ -507,26 +566,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_tickets = session.query(Ticket).filter(Ticket.status.in_(['open', 'escalated'])).count()
 
         welcome_text = f"""
-🎉 **Benvenuto nel Bot di Gestione Liste!**
+{localization.get_text('welcome.title', user_lang)}
 
 {prefix} **{update.effective_user.first_name or 'Utente'}**
 
-📊 **Statistiche Sistema:**
-• 📋 Liste attive: **{total_lists}**
-• 🎫 Ticket aperti: **{active_tickets}**
+{localization.get_text('welcome.stats', user_lang)}
+• {localization.get_text('welcome.active_lists', user_lang, count=total_lists)}
+• {localization.get_text('welcome.open_tickets', user_lang, count=active_tickets)}
 
-💡 **Cosa posso fare per te?**
+{localization.get_text('welcome.actions', user_lang)}
         """
 
         keyboard = [
-            [InlineKeyboardButton("🔍 Cerca Lista", callback_data='search_list')],
-            [InlineKeyboardButton("🎫 Ticket Assistenza", callback_data='ticket_menu')],
-            [InlineKeyboardButton("📊 Dashboard Personale", callback_data='user_stats')],
-            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
+            [InlineKeyboardButton(localization.get_button_text('search_list', user_lang), callback_data='search_list')],
+            [InlineKeyboardButton(localization.get_button_text('ticket_support', user_lang), callback_data='ticket_menu')],
+            [InlineKeyboardButton(localization.get_button_text('personal_dashboard', user_lang), callback_data='user_stats')],
+            [InlineKeyboardButton(localization.get_button_text('help_guide', user_lang), callback_data='help')]
         ]
 
         if is_admin(user_id):
-            keyboard.insert(0, [InlineKeyboardButton("⚙️ Admin Panel", callback_data='admin_panel')])
+            keyboard.insert(0, [InlineKeyboardButton(localization.get_button_text('admin_panel', user_lang), callback_data='admin_panel')])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -534,50 +593,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"❌ Error in start command for user {user_id}: {e}")
-        await update.message.reply_text("❌ Si è verificato un errore. Riprova più tardi.")
+        error_msg = localization.get_text('errors.generic', user_lang)
+        await update.message.reply_text(error_msg)
     finally:
         session.close()
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-❓ **Guida Completa del Bot** ❓
+    user_id = update.effective_user.id
+    user_lang = get_user_language(user_id)
 
-🔍 **Cerca Liste:**
-• Inserisci il nome esatto della lista
-• Visualizza dettagli completi
-• Gestisci rinnovi e notifiche
+    help_text = f"""
+{localization.get_text('help.title', user_lang)}
 
-🎫 **Sistema Ticket:**
-• Apri ticket per problemi tecnici
-• L'AI risponde automaticamente
-• Continua la conversazione se necessario
-• Gli admin intervengono per problemi complessi
+{localization.get_text('help.search_section', user_lang)}
+{localization.get_text('help.search_desc', user_lang)}
 
-🔔 **Notifiche Scadenza:**
-• Imposta promemoria personalizzati
-• 1, 3 o 5 giorni prima della scadenza
-• Ricevi alert automatici
+{localization.get_text('help.ticket_section', user_lang)}
+{localization.get_text('help.ticket_desc', user_lang)}
 
-⚙️ **Admin Panel (Solo Admin):**
-• Gestisci tutte le liste
-• Monitora i ticket
-• Visualizza statistiche
-• Backup e manutenzione
+{localization.get_text('help.notifications_section', user_lang)}
+{localization.get_text('help.notifications_desc', user_lang)}
 
-💡 **Comandi Rapidi:**
-• `/status` - Stato delle tue liste e ticket
-• `/renew` - Rinnova una lista specifica
-• `/support` - Menu assistenza diretta
-• `/dashboard` - Riepilogo personale
+{localization.get_text('help.admin_section', user_lang)}
+{localization.get_text('help.admin_desc', user_lang)}
 
-🎯 **Suggerimenti:**
-• Usa i comandi /start per tornare al menu
-• Le risposte AI sono automatiche ma accurate
-• Gli admin sono sempre disponibili per supporto
+{localization.get_text('help.commands', user_lang)}
+{localization.get_text('help.commands_desc', user_lang)}
+
+{localization.get_text('help.tips', user_lang)}
+{localization.get_text('help.tips_desc', user_lang)}
 """
     keyboard = [
-        [InlineKeyboardButton("🎫 Apri Ticket", callback_data='ticket_menu')],
-        [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+        [InlineKeyboardButton(localization.get_button_text('create_ticket', user_lang), callback_data='ticket_menu')],
+        [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -590,36 +638,39 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == 'admin_panel':
         if not is_admin(user_id):
-            await query.edit_message_text("❌ Accesso negato! Solo gli admin possono accedere.")
+            user_lang = get_user_language(user_id)
+            await query.edit_message_text(localization.get_text('errors.access_denied', user_lang))
             return
+        user_lang = get_user_language(user_id)
         keyboard = [
-            [InlineKeyboardButton("📋 Gestisci Liste", callback_data='admin_lists')],
-            [InlineKeyboardButton("🎫 Ticket Management", callback_data='admin_tickets')],
-            [InlineKeyboardButton("🔄 Richieste Rinnovo", callback_data='admin_renewals')],
-            [InlineKeyboardButton("📊 Analytics & Metrics", callback_data='admin_analytics')],
-            [InlineKeyboardButton("📈 Performance Monitor", callback_data='admin_performance')],
-            [InlineKeyboardButton("💰 Revenue & Renewals", callback_data='admin_revenue')],
-            [InlineKeyboardButton("👥 User Management", callback_data='admin_users')],
-            [InlineKeyboardButton("🔧 System Health", callback_data='admin_health')],
-            [InlineKeyboardButton("📋 Audit & Logs", callback_data='admin_audit')],
-            [InlineKeyboardButton("🚨 ALLERT - Messaggio di Massa", callback_data='admin_alert')],
-            [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+            [InlineKeyboardButton(localization.get_text('admin.lists_management', user_lang), callback_data='admin_lists')],
+            [InlineKeyboardButton(localization.get_text('admin.tickets_management', user_lang), callback_data='admin_tickets')],
+            [InlineKeyboardButton(localization.get_text('admin.renewals_management', user_lang), callback_data='admin_renewals')],
+            [InlineKeyboardButton(localization.get_text('admin.analytics', user_lang), callback_data='admin_analytics')],
+            [InlineKeyboardButton(localization.get_text('admin.performance', user_lang), callback_data='admin_performance')],
+            [InlineKeyboardButton(localization.get_text('admin.revenue', user_lang), callback_data='admin_revenue')],
+            [InlineKeyboardButton(localization.get_text('admin.users', user_lang), callback_data='admin_users')],
+            [InlineKeyboardButton(localization.get_text('admin.health', user_lang), callback_data='admin_health')],
+            [InlineKeyboardButton(localization.get_text('admin.audit', user_lang), callback_data='admin_audit')],
+            [InlineKeyboardButton(localization.get_text('admin.mass_alert', user_lang), callback_data='admin_alert')],
+            [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("👑 **Admin Dashboard - Business Intelligence**\n\nScegli una sezione per analisi dettagliate:", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(f"{localization.get_text('admin.panel_title', user_lang)}\n\n{localization.get_text('admin.choose_section', user_lang)}", reply_markup=reply_markup, parse_mode='Markdown')
 
     elif data == 'search_list':
         await query.edit_message_text("🔍 Inserisci il nome esatto della lista che vuoi cercare:")
         context.user_data['action'] = 'search_list'
 
     elif data == 'ticket_menu':
+        user_lang = get_user_language(query.from_user.id)
         keyboard = [
-            [InlineKeyboardButton("📝 Apri Nuovo Ticket", callback_data='open_ticket')],
-            [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
-            [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+            [InlineKeyboardButton(localization.get_button_text('create_ticket', user_lang), callback_data='open_ticket')],
+            [InlineKeyboardButton(localization.get_button_text('my_tickets', user_lang), callback_data='my_tickets')],
+            [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🎫 **Menu Ticket**\n\nCosa vuoi fare?", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(localization.get_text('ticket.menu_title', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
 
     elif data == 'user_stats':
         session = SessionLocal()
@@ -655,14 +706,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if days_until >= 0:
                             stats_text += f"• {lst.name}: {days_until} giorni\n"
 
-            keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]]
+            keyboard = [
+                [InlineKeyboardButton("📤 Esporta Dati", callback_data='export_data')],
+                [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Error in user_stats for user {user_id}: {str(e)}")
-            await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle statistiche. Riprova più tardi.")
+            user_lang = get_user_language(user_id)
+            await query.edit_message_text(localization.get_text('errors.stats_error', user_lang))
         finally:
             session.close()
+
+    elif data == 'export_data':
+        user_lang = get_user_language(user_id)
+        keyboard = [
+            [InlineKeyboardButton(localization.get_button_text('export_tickets', user_lang), callback_data='export_tickets')],
+            [InlineKeyboardButton(localization.get_button_text('export_notifications', user_lang), callback_data='export_notifications')],
+            [InlineKeyboardButton(localization.get_button_text('export_all', user_lang), callback_data='export_all')],
+            [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(localization.get_text('export.choose_type', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
 
     elif data == 'admin_alert':
         if not is_admin(user_id):
@@ -773,39 +839,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
 
     elif data == 'help':
-        help_text = """
-🎯 **Guida Completa del Bot**
+        user_lang = get_user_language(query.from_user.id)
+        help_text = f"""
+{localization.get_text('help.title', user_lang)}
 
-🔍 **Cerca Liste:**
-• Inserisci il nome esatto della lista
-• Visualizza dettagli completi
-• Gestisci rinnovi e notifiche
+{localization.get_text('help.search_section', user_lang)}
+{localization.get_text('help.search_desc', user_lang)}
 
-🎫 **Sistema Ticket:**
-• Apri ticket per problemi tecnici
-• L'AI risponde automaticamente
-• Continua la conversazione se necessario
-• Gli admin intervengono per problemi complessi
+{localization.get_text('help.ticket_section', user_lang)}
+{localization.get_text('help.ticket_desc', user_lang)}
 
-🔔 **Notifiche Scadenza:**
-• Imposta promemoria personalizzati
-• 1, 3 o 5 giorni prima della scadenza
-• Ricevi alert automatici
+{localization.get_text('help.notifications_section', user_lang)}
+{localization.get_text('help.notifications_desc', user_lang)}
 
-⚙️ **Admin Panel (Solo Admin):**
-• Gestisci tutte le liste
-• Monitora i ticket
-• Visualizza statistiche
-• Backup e manutenzione
+{localization.get_text('help.admin_section', user_lang)}
+{localization.get_text('help.admin_desc', user_lang)}
 
-💡 **Suggerimenti:**
-• Usa i comandi /start per tornare al menu
-• Le risposte AI sono automatiche ma accurate
-• Gli admin sono sempre disponibili per supporto
+{localization.get_text('help.commands', user_lang)}
+{localization.get_text('help.commands_desc', user_lang)}
+
+{localization.get_text('help.tips', user_lang)}
+{localization.get_text('help.tips_desc', user_lang)}
 """
         keyboard = [
-            [InlineKeyboardButton("🎫 Apri Ticket", callback_data='ticket_menu')],
-            [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+            [InlineKeyboardButton(localization.get_button_text('create_ticket', user_lang), callback_data='ticket_menu')],
+            [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -854,22 +912,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             list_obj = session.query(List).filter(List.name == message_text).first()
             if list_obj:
+                user_lang = get_user_language(user_id)
                 expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
                 response = f"""
-📋 **Lista Trovata!**
+{localization.get_text('list.found', user_lang)}
 
-📝 **Nome:** {list_obj.name}
-💰 **Costo:** {list_obj.cost}
-📅 **Scadenza:** {expiry_str}
-📝 **Note:** {list_obj.notes or "Nessuna nota"}
+{localization.get_text('list.name', user_lang, name=list_obj.name)}
+{localization.get_text('list.cost', user_lang, cost=list_obj.cost)}
+{localization.get_text('list.expiry', user_lang, date=expiry_str)}
+{localization.get_text('list.notes', user_lang, notes=list_obj.notes or "Nessuna nota")}
 
-Cosa vuoi fare con questa lista?
+{localization.get_text('list.actions', user_lang)}
 """
                 keyboard = [
-                    [InlineKeyboardButton("🔄 Rinnova", callback_data=f'renew_list:{list_obj.name}')],
-                    [InlineKeyboardButton("🗑️ Elimina", callback_data=f'delete_list:{list_obj.name}')],
-                    [InlineKeyboardButton("🔔 Notifiche Scadenza", callback_data=f'notify_list:{list_obj.name}')],
-                    [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
+                    [InlineKeyboardButton(localization.get_button_text('renew', user_lang), callback_data=f'renew_list:{list_obj.name}')],
+                    [InlineKeyboardButton(localization.get_button_text('delete', user_lang), callback_data=f'delete_list:{list_obj.name}')],
+                    [InlineKeyboardButton(localization.get_button_text('notifications', user_lang), callback_data=f'notify_list:{list_obj.name}')],
+                    [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='Markdown')
@@ -877,12 +936,14 @@ Cosa vuoi fare con questa lista?
                 # Log successo ricerca
                 log_list_event(list_obj.name, "searched", user_id, "Found and displayed")
             else:
-                await update.message.reply_text("❌ Lista non trovata. Assicurati di aver scritto il nome esatto.")
+                user_lang = get_user_language(user_id)
+                await update.message.reply_text(localization.get_text('list.not_found', user_lang))
                 # Log ricerca fallita
                 log_user_action(user_id, "search_list_failed", f"Query: {message_text}")
         except Exception as e:
             logger.error(f"Error in search_list for user {user_id}: {str(e)}")
-            await update.message.reply_text("❌ Si è verificato un errore durante la ricerca. Riprova più tardi.")
+            user_lang = get_user_language(user_id)
+            await update.message.reply_text(localization.get_text('errors.search_error', user_lang))
         finally:
             session.close()
         context.user_data.pop('action', None)
@@ -890,7 +951,8 @@ Cosa vuoi fare con questa lista?
     elif action == 'open_ticket':
         context.user_data['ticket_title'] = message_text
         context.user_data['action'] = 'ticket_description'
-        await update.message.reply_text("📝 Ora descrivi il problema in dettaglio:")
+        user_lang = get_user_language(user_id)
+        await update.message.reply_text(localization.get_text('ticket.describe_problem', user_lang))
 
     elif action == 'ticket_description':
         title = context.user_data.get('ticket_title')
@@ -898,8 +960,9 @@ Cosa vuoi fare con questa lista?
         ticket = None
         try:
             # Validate input
+            user_lang = get_user_language(user_id)
             if not title or not message_text:
-                await update.message.reply_text("❌ Titolo e descrizione del ticket sono obbligatori.")
+                await update.message.reply_text(localization.get_text('errors.empty_title', user_lang))
                 return
 
             # Sanitize input
@@ -907,7 +970,7 @@ Cosa vuoi fare con questa lista?
             description = sanitize_text(message_text, 2000)
 
             if not title or not description:
-                await update.message.reply_text("❌ Input non valido. Riprova con testo diverso.")
+                await update.message.reply_text(localization.get_text('errors.invalid_input', user_lang))
                 return
 
             # Create ticket with all required fields
@@ -939,14 +1002,14 @@ Cosa vuoi fare con questa lista?
 
                 # Create conversation keyboard
                 keyboard = [
-                    [InlineKeyboardButton("💬 Continua Conversazione", callback_data=f'continue_ticket:{ticket.id}')],
-                    [InlineKeyboardButton("✅ Problema Risolto", callback_data=f'close_ticket_user:{ticket.id}')],
-                    [InlineKeyboardButton("👨‍💼 Parla con Admin", callback_data=f'escalate_ticket:{ticket.id}')]
+                    [InlineKeyboardButton(localization.get_button_text('continue', user_lang), callback_data=f'continue_ticket:{ticket.id}')],
+                    [InlineKeyboardButton(localization.get_button_text('close_ticket', user_lang), callback_data=f'close_ticket_user:{ticket.id}')],
+                    [InlineKeyboardButton(localization.get_button_text('contact_admin', user_lang), callback_data=f'escalate_ticket:{ticket.id}')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 **Risposta AI:**\n{ai_response}\n\n💬 **Questa conversazione rimane aperta!**\n\nPuoi continuare a scrivere messaggi qui per ricevere altre risposte dall'AI, oppure scegliere un'opzione:",
+                    f"{localization.get_text('ticket.created', user_lang, id=ticket.id)}\n\n{localization.get_text('ticket.ai_response', user_lang)}\n{ai_response}\n\n{localization.get_text('ticket.open_conversation', user_lang)}\n\nPuoi continuare a scrivere messaggi qui per ricevere altre risposte dall'AI, oppure scegliere un'opzione:",
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
@@ -960,13 +1023,13 @@ Cosa vuoi fare con questa lista?
                 session.commit()
 
                 keyboard = [
-                    [InlineKeyboardButton("📝 Aggiungi Dettagli", callback_data=f'continue_ticket:{ticket.id}')],
-                    [InlineKeyboardButton("👨‍💼 Contatta Admin", callback_data=f'contact_admin:{ticket.id}')]
+                    [InlineKeyboardButton(localization.get_button_text('add_details', user_lang), callback_data=f'continue_ticket:{ticket.id}')],
+                    [InlineKeyboardButton(localization.get_button_text('contact_admin', user_lang), callback_data=f'contact_admin:{ticket.id}')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    f"🎫 **Ticket #{ticket.id} creato!**\n\n🤖 Il mio assistente automatico non è in grado di risolvere questo problema.\n\n👨‍💼 **Un amministratore ti contatterà presto per assistenza personalizzata.**\n\n💬 **Nel frattempo puoi continuare ad aggiungere dettagli al ticket scrivendo messaggi qui:**",
+                    f"{localization.get_text('ticket.created', user_lang, id=ticket.id)}\n\n{localization.get_text('ticket.ai_unable', user_lang)}\n\n{localization.get_text('ticket.admin_contact', user_lang)}\n\n{localization.get_text('ticket.add_details', user_lang)}",
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
@@ -1013,7 +1076,8 @@ Cosa vuoi fare con questa lista?
                     session.rollback()
                 except:
                     pass
-            await update.message.reply_text("❌ Si è verificato un errore nella creazione del ticket. Riprova più tardi.")
+            user_lang = get_user_language(user_id)
+            await update.message.reply_text(localization.get_text('errors.ticket_creation', user_lang))
         finally:
             try:
                 session.close()
@@ -1026,19 +1090,22 @@ Cosa vuoi fare con questa lista?
     elif action == 'create_list_name':
         context.user_data['create_list_name'] = message_text
         context.user_data['action'] = 'create_list_cost'
-        await update.message.reply_text("💰 Inserisci il costo della lista:")
+        user_lang = get_user_language(user_id)
+        await update.message.reply_text(localization.get_text('list.enter_cost', user_lang))
 
     elif action == 'create_list_cost':
         context.user_data['create_list_cost'] = message_text
         context.user_data['action'] = 'create_list_expiry'
-        await update.message.reply_text("📅 Inserisci la data di scadenza (formato: DD/MM/YYYY):")
+        user_lang = get_user_language(user_id)
+        await update.message.reply_text(localization.get_text('list.enter_expiry', user_lang))
 
     elif action == 'create_list_expiry':
         try:
             expiry_date = datetime.strptime(message_text, "%d/%m/%Y").replace(tzinfo=timezone.utc)
             context.user_data['create_list_expiry'] = expiry_date
             context.user_data['action'] = 'create_list_notes'
-            await update.message.reply_text("📝 Inserisci le note della lista (o 'nessuna' se non ce ne sono):")
+            user_lang = get_user_language(user_id)
+            await update.message.reply_text(localization.get_text('list.enter_notes', user_lang))
         except ValueError:
             await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)")
 
@@ -1054,7 +1121,8 @@ Cosa vuoi fare con questa lista?
             )
             session.add(new_list)
             session.commit()
-            await update.message.reply_text(f"✅ Lista **{new_list.name}** creata con successo!")
+            user_lang = get_user_language(user_id)
+            await update.message.reply_text(localization.get_text('list.created', user_lang, name=new_list.name))
         finally:
             session.close()
         context.user_data.pop('action', None)
@@ -1076,9 +1144,11 @@ Cosa vuoi fare con questa lista?
                     [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await update.message.reply_text(f"🔄 Vuoi rinnovare **{list_obj.name}** per quanti mesi?\n\n💰 Ogni mese costa €15", reply_markup=reply_markup, parse_mode='Markdown')
+                user_lang = get_user_language(user_id)
+                await update.message.reply_text(localization.get_text('renew.select_months', user_lang, name=list_obj.name), reply_markup=reply_markup, parse_mode='Markdown')
             else:
-                await update.message.reply_text("❌ Lista non trovata. Assicurati di aver scritto il nome esatto.")
+                user_lang = get_user_language(user_id)
+                await update.message.reply_text(localization.get_text('list.not_found', user_lang))
         finally:
             session.close()
         context.user_data.pop('action', None)
@@ -1290,7 +1360,8 @@ Cosa vuoi fare con questa lista?
                     expiry_date = datetime.strptime(message_text.strip(), "%d/%m/%Y").replace(tzinfo=timezone.utc)
                     list_obj.expiry_date = expiry_date
                 except ValueError:
-                    await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)")
+                    user_lang = get_user_language(user_id)
+                    await update.message.reply_text(localization.get_text('errors.invalid_date', user_lang))
                     return
             elif field == 'notes':
                 list_obj.notes = message_text.strip() if message_text.lower() != 'nessuna' else None
@@ -1596,7 +1667,8 @@ async def notify_days_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 async def open_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("📝 Inserisci il titolo del ticket:")
+    user_lang = get_user_language(query.from_user.id)
+    await query.edit_message_text(localization.get_text('ticket.enter_title', user_lang))
     context.user_data['action'] = 'open_ticket'
 
 async def my_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1629,17 +1701,29 @@ async def view_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     ticket_id = int(query.data.split(':')[1])
     user_id = query.from_user.id
+    user_lang = get_user_language(user_id)
 
     session = SessionLocal()
     try:
         ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
         if not ticket:
-            await query.edit_message_text("❌ Ticket non trovato.")
+            await query.edit_message_text(localization.get_text('errors.ticket_not_found', user_lang))
             return
 
         messages = session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket_id).order_by(TicketMessage.created_at).all()
 
-        ticket_text = f"🎫 **Ticket #{ticket.id}**\n📝 Titolo: {ticket.title}\n📄 Descrizione: {ticket.description}\n📊 Stato: {ticket.status}\n\n💬 **Messaggi:**\n\n"
+        # Generate AI summary if ticket has many messages
+        summary = ""
+        if len(messages) > 3:
+            try:
+                conversation_text = "\n".join([f"{msg.message}" for msg in messages[-5:]])  # Last 5 messages
+                summary = ai_service.generate_ticket_summary(ticket.title, conversation_text, user_lang)
+                if summary:
+                    summary = f"\n📋 **{localization.get_text('ticket.summary', user_lang)}**\n{summary}\n\n"
+            except Exception as e:
+                logger.warning(f"Failed to generate ticket summary: {e}")
+
+        ticket_text = f"{localization.get_text('ticket.details', user_lang, id=ticket.id, title=ticket.title, description=ticket.description, status=ticket.status)}\n\n{summary}💬 **{localization.get_text('ticket.messages', user_lang)}**\n\n"
 
         for msg in messages:
             sender = "🤖 AI" if msg.is_ai else ("👑 Admin" if msg.is_admin else "👤 Tu")
@@ -1647,9 +1731,9 @@ async def view_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = []
         if ticket.status == 'open':
-            keyboard.append([InlineKeyboardButton("💬 Rispondi", callback_data=f'reply_ticket:{ticket.id}')])
-            keyboard.append([InlineKeyboardButton("✅ Chiudi Ticket", callback_data=f'close_ticket:{ticket.id}')])
-        keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='my_tickets')])
+            keyboard.append([InlineKeyboardButton(localization.get_button_text('reply', user_lang), callback_data=f'reply_ticket:{ticket.id}')])
+            keyboard.append([InlineKeyboardButton(localization.get_button_text('close_ticket', user_lang), callback_data=f'close_ticket:{ticket.id}')])
+        keyboard.append([InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='my_tickets')])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -1661,7 +1745,8 @@ async def reply_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     ticket_id = int(query.data.split(':')[1])
     context.user_data['reply_ticket'] = ticket_id
-    await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
+    user_lang = get_user_language(query.from_user.id)
+    await query.edit_message_text(localization.get_text('ticket.enter_reply', user_lang))
 
 async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle replies to ticket messages"""
@@ -1784,15 +1869,16 @@ async def continue_ticket_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     ticket_id = int(query.data.split(':')[1])
     user_id = query.from_user.id
+    user_lang = get_user_language(user_id)
 
     session = SessionLocal()
     try:
         ticket = session.query(Ticket).filter(Ticket.id == ticket_id, Ticket.user_id == user_id).first()
         if ticket:
             context.user_data['reply_ticket'] = ticket_id
-            await query.edit_message_text("💬 Scrivi la tua risposta al ticket:")
+            await query.edit_message_text(localization.get_text('ticket.enter_reply', user_lang))
         else:
-            await query.edit_message_text("❌ Ticket non trovato.")
+            await query.edit_message_text(localization.get_text('errors.ticket_not_found', user_lang))
     finally:
         session.close()
 
@@ -1962,6 +2048,82 @@ async def cleanup_closed_tickets():
 
     except Exception as e:
         logger.error(f"CLEANUP_ERROR - {str(e)}")
+    finally:
+        session.close()
+
+async def auto_escalate_tickets():
+    """Escalation automatica dei ticket senza risposta da troppo tempo"""
+    try:
+        session = SessionLocal()
+        now = datetime.now(timezone.utc)
+
+        # Ticket aperti senza risposta da più di 48 ore
+        old_open_tickets = session.query(Ticket).filter(
+            Ticket.status == 'open',
+            Ticket.updated_at < now - timedelta(hours=48)
+        ).all()
+
+        escalated_count = 0
+        for ticket in old_open_tickets:
+            # Verifica se ci sono messaggi admin recenti
+            recent_admin_messages = session.query(TicketMessage).filter(
+                TicketMessage.ticket_id == ticket.id,
+                TicketMessage.is_admin == True,
+                TicketMessage.created_at > now - timedelta(hours=24)
+            ).count()
+
+            # Se non ci sono messaggi admin recenti, scala il ticket
+            if recent_admin_messages == 0:
+                ticket.status = 'escalated'
+                ticket.updated_at = now
+                escalated_count += 1
+
+                # Notifica admin dell'escalation automatica
+                escalation_msg = f"""🚨 **Escalation Automatica Ticket**
+
+🎫 **Ticket ID:** #{ticket.id}
+👤 **User ID:** {ticket.user_id}
+📝 **Titolo:** {ticket.title}
+⏰ **Ultimo aggiornamento:** {ticket.updated_at.strftime('%d/%m/%Y %H:%M')}
+
+Questo ticket è stato escalato automaticamente per mancanza di risposta da parte del supporto."""
+
+                # Invia notifica a tutti gli admin (nota: context.bot non è disponibile qui, serve refactoring)
+                logger.info(f"AUTO_ESCALATION - Ticket #{ticket.id} escalated automatically")
+
+        session.commit()
+        logger.info(f"AUTO_ESCALATION_COMPLETED - Escalated {escalated_count} tickets")
+
+    except Exception as e:
+        logger.error(f"AUTO_ESCALATION_ERROR - {str(e)}")
+    finally:
+        session.close()
+
+async def cleanup_old_tickets():
+    """Pulizia settimanale dei ticket molto vecchi (chiusi da più di 30 giorni)"""
+    try:
+        session = SessionLocal()
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=30)
+
+        # Trova ticket chiusi più vecchi di 30 giorni
+        very_old_tickets = session.query(Ticket).filter(
+            Ticket.status == 'closed',
+            Ticket.updated_at < cutoff_time
+        ).all()
+
+        deleted_count = 0
+        for ticket in very_old_tickets:
+            # Elimina messaggi del ticket
+            session.query(TicketMessage).filter(TicketMessage.ticket_id == ticket.id).delete()
+            # Elimina il ticket
+            session.delete(ticket)
+            deleted_count += 1
+
+        session.commit()
+        logger.info(f"WEEKLY_CLEANUP_COMPLETED - Deleted {deleted_count} very old closed tickets")
+
+    except Exception as e:
+        logger.error(f"WEEKLY_CLEANUP_ERROR - {str(e)}")
     finally:
         session.close()
 
@@ -2491,6 +2653,148 @@ La tua richiesta di rinnovo è stata messa sotto revisione. Un amministratore ti
     except Exception as e:
         logger.error(f"Error contesting renewal {renewal_id}: {str(e)}")
         await query.edit_message_text("❌ Si è verificato un errore nella contestazione. Riprova più tardi.")
+    finally:
+        session.close()
+
+async def export_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export user tickets as CSV"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_lang = get_user_language(user_id)
+
+    session = SessionLocal()
+    try:
+        tickets = session.query(Ticket).filter(Ticket.user_id == user_id).all()
+
+        if not tickets:
+            await query.edit_message_text(localization.get_text('export.no_tickets', user_lang))
+            return
+
+        # Create CSV content
+        csv_content = "ID,Titolo,Descrizione,Stato,Data Creazione,Data Aggiornamento\n"
+        for ticket in tickets:
+            csv_content += f"{ticket.id},{ticket.title},{ticket.description},{ticket.status},{ticket.created_at.strftime('%Y-%m-%d %H:%M')},{ticket.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+
+        # Send as document
+        await context.bot.send_document(
+            chat_id=user_id,
+            document=csv_content.encode('utf-8'),
+            filename=f"tickets_export_{datetime.now().strftime('%Y%m%d')}.csv",
+            caption=localization.get_text('export.tickets_sent', user_lang)
+        )
+
+        await query.edit_message_text(localization.get_text('export.success', user_lang))
+
+        # Log export action
+        log_user_action(user_id, "exported_tickets", f"Exported {len(tickets)} tickets")
+
+    except Exception as e:
+        logger.error(f"Error exporting tickets for user {user_id}: {str(e)}")
+        await query.edit_message_text(localization.get_text('errors.export_error', user_lang))
+    finally:
+        session.close()
+
+async def export_notifications_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export user notifications as CSV"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_lang = get_user_language(user_id)
+
+    session = SessionLocal()
+    try:
+        notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).all()
+
+        if not notifications:
+            await query.edit_message_text(localization.get_text('export.no_notifications', user_lang))
+            return
+
+        # Create CSV content
+        csv_content = "Lista,Giorni Prima\n"
+        for notif in notifications:
+            csv_content += f"{notif.list_name},{notif.days_before}\n"
+
+        # Send as document
+        await context.bot.send_document(
+            chat_id=user_id,
+            document=csv_content.encode('utf-8'),
+            filename=f"notifications_export_{datetime.now().strftime('%Y%m%d')}.csv",
+            caption=localization.get_text('export.notifications_sent', user_lang)
+        )
+
+        await query.edit_message_text(localization.get_text('export.success', user_lang))
+
+        # Log export action
+        log_user_action(user_id, "exported_notifications", f"Exported {len(notifications)} notifications")
+
+    except Exception as e:
+        logger.error(f"Error exporting notifications for user {user_id}: {str(e)}")
+        await query.edit_message_text(localization.get_text('errors.export_error', user_lang))
+    finally:
+        session.close()
+
+async def export_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export all user data as JSON"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    user_lang = get_user_language(user_id)
+
+    session = SessionLocal()
+    try:
+        # Get all user data
+        tickets = session.query(Ticket).filter(Ticket.user_id == user_id).all()
+        notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).all()
+        activities = session.query(UserActivity).filter(UserActivity.user_id == user_id).order_by(UserActivity.timestamp.desc()).limit(50).all()
+
+        # Create JSON export
+        export_data = {
+            "export_date": datetime.now().isoformat(),
+            "user_id": user_id,
+            "tickets": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "description": t.description,
+                    "status": t.status,
+                    "created_at": t.created_at.isoformat(),
+                    "updated_at": t.updated_at.isoformat()
+                } for t in tickets
+            ],
+            "notifications": [
+                {
+                    "list_name": n.list_name,
+                    "days_before": n.days_before
+                } for n in notifications
+            ],
+            "recent_activities": [
+                {
+                    "action": a.action,
+                    "timestamp": a.timestamp.isoformat(),
+                    "details": a.details
+                } for a in activities
+            ]
+        }
+
+        json_content = json.dumps(export_data, ensure_ascii=False, indent=2)
+
+        # Send as document
+        await context.bot.send_document(
+            chat_id=user_id,
+            document=json_content.encode('utf-8'),
+            filename=f"complete_export_{datetime.now().strftime('%Y%m%d')}.json",
+            caption=localization.get_text('export.all_sent', user_lang)
+        )
+
+        await query.edit_message_text(localization.get_text('export.success', user_lang))
+
+        # Log export action
+        log_user_action(user_id, "exported_all_data", f"Exported {len(tickets)} tickets, {len(notifications)} notifications, {len(activities)} activities")
+
+    except Exception as e:
+        logger.error(f"Error exporting all data for user {user_id}: {str(e)}")
+        await query.edit_message_text(localization.get_text('errors.export_error', user_lang))
     finally:
         session.close()
 
@@ -3109,7 +3413,7 @@ async def run_bot_main_loop():
             try:
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="❌ Si è verificato un errore. Riprova più tardi o contatta il supporto."
+                    text=localization.get_text('errors.generic', get_user_language(update.effective_chat.id))
                 )
             except Exception as e:
                 logger.error(f"Failed to send error message to user: {e}")
@@ -3144,7 +3448,8 @@ async def run_bot_main_loop():
         user_id = update.effective_user.id
 
         if not check_rate_limit(user_id):
-            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            user_lang = get_user_language(user_id)
+            await update.message.reply_text(localization.get_text('errors.rate_limit', user_lang), parse_mode='Markdown')
             return
 
         session = SessionLocal()
@@ -3195,6 +3500,70 @@ async def run_bot_main_loop():
         # Alias for status command
         await status_command(update, context)
 
+    async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Analytics dashboard command for users"""
+        user_id = update.effective_user.id
+        user_lang = get_user_language(user_id)
+
+        if not check_rate_limit(user_id, 'admin_action'):
+            await update.message.reply_text(localization.get_text('errors.rate_limit', user_lang), parse_mode='Markdown')
+            return
+
+        session = SessionLocal()
+        try:
+            # User-specific analytics
+            user_tickets = session.query(Ticket).filter(Ticket.user_id == user_id).count()
+            user_open_tickets = session.query(Ticket).filter(Ticket.user_id == user_id, Ticket.status.in_(['open', 'escalated'])).count()
+            user_closed_tickets = session.query(Ticket).filter(Ticket.user_id == user_id, Ticket.status == 'closed').count()
+
+            # Activity metrics
+            last_week_activities = session.query(UserActivity).filter(
+                UserActivity.user_id == user_id,
+                UserActivity.timestamp >= datetime.now(timezone.utc) - timedelta(days=7)
+            ).count()
+
+            # List monitoring
+            user_notifications = session.query(UserNotification).filter(UserNotification.user_id == user_id).count()
+            active_notifications = session.query(UserNotification).filter(
+                UserNotification.user_id == user_id,
+                UserNotification.list_name.in_(
+                    session.query(List.name).filter(List.expiry_date > datetime.now(timezone.utc))
+                )
+            ).count()
+
+            # Calculate resolution rate
+            resolution_rate = (user_closed_tickets / user_tickets * 100) if user_tickets > 0 else 0
+
+            stats_text = f"""
+{localization.get_text('stats.title', user_lang)}
+
+{localization.get_text('stats.tickets_total', user_lang, count=user_tickets)}
+{localization.get_text('stats.tickets_open', user_lang, count=user_open_tickets)}
+{localization.get_text('stats.tickets_closed', user_lang, count=user_closed_tickets)}
+{localization.get_text('stats.resolution_rate', user_lang, rate=resolution_rate)}
+
+{localization.get_text('stats.activity_week', user_lang, count=last_week_activities)}
+{localization.get_text('stats.notifications_total', user_lang, count=user_notifications)}
+{localization.get_text('stats.notifications_active', user_lang, count=active_notifications)}
+
+{localization.get_text('stats.improvement_tips', user_lang)}
+            """
+
+            keyboard = [
+                [InlineKeyboardButton(localization.get_button_text('view_tickets', user_lang), callback_data='my_tickets')],
+                [InlineKeyboardButton(localization.get_button_text('personal_dashboard', user_lang), callback_data='user_stats')],
+                [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+            # Log stats access
+            log_user_action(user_id, "viewed_personal_stats")
+
+        finally:
+            session.close()
+
     async def renew_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
 
@@ -3202,7 +3571,8 @@ async def run_bot_main_loop():
             await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
             return
 
-        await update.message.reply_text("🔄 **Rinnovo Liste**\n\nInserisci il nome esatto della lista che vuoi rinnovare:", parse_mode='Markdown')
+        user_lang = get_user_language(user_id)
+        await update.message.reply_text(localization.get_text('renew.enter_name', user_lang), parse_mode='Markdown')
         context.user_data['action'] = 'quick_renew'
 
     async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3215,11 +3585,14 @@ async def run_bot_main_loop():
         keyboard = [
             [InlineKeyboardButton("📝 Apri Nuovo Ticket", callback_data='open_ticket')],
             [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
-            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')]
+            [InlineKeyboardButton("❓ Guida & Aiuto", callback_data='help')],
+            [InlineKeyboardButton("📊 Le Mie Statistiche", callback_data='user_stats')],
+            [InlineKeyboardButton("📤 Esporta Dati", callback_data='export_data')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_text("🎫 **Supporto Tecnico**\n\nCome possiamo aiutarti?", reply_markup=reply_markup, parse_mode='Markdown')
+        user_lang = get_user_language(user_id)
+        await update.message.reply_text(localization.get_text('support.title', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
 
     async def stop_contact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Stop direct contact with user"""
@@ -3248,13 +3621,14 @@ async def run_bot_main_loop():
     application.add_handler(CommandHandler("renew", renew_command))
     application.add_handler(CommandHandler("support", support_command))
     application.add_handler(CommandHandler("stop_contact", stop_contact_command))
+    application.add_handler(CommandHandler("stats", stats_command))
 
     logger.info("📝 Registering message handlers...")
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
     logger.info("📝 Registering callback query handlers...")
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert)$'))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert|export_data)$'))
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
@@ -3294,6 +3668,9 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
     application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
     application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
+    application.add_handler(CallbackQueryHandler(export_tickets_callback, pattern='^export_tickets$'))
+    application.add_handler(CallbackQueryHandler(export_notifications_callback, pattern='^export_notifications$'))
+    application.add_handler(CallbackQueryHandler(export_all_callback, pattern='^export_all$'))
 
     logger.info("✅ All handlers registered successfully")
 
@@ -3304,6 +3681,9 @@ async def run_bot_main_loop():
 
         # Pianifica notifiche di scadenza ogni ora
         scheduler.add_job(send_expiry_notifications, CronTrigger(minute=0))  # Ogni ora
+
+        # Pianifica promemoria personalizzati ogni giorno alle 10:00
+        scheduler.add_job(send_custom_reminders, CronTrigger(hour=10, minute=0))  # Ogni giorno alle 10:00
 
         # Enhanced background tasks
         scheduler.add_job(lambda: task_manager.process_queued_tasks(), CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
@@ -3318,6 +3698,12 @@ async def run_bot_main_loop():
 
         # Pianifica sincronizzazione contatori ogni 30 minuti
         scheduler.add_job(sync_user_counters, CronTrigger(minute='*/30'))  # Ogni 30 minuti
+
+        # Pianifica escalation automatica ticket ogni 6 ore
+        scheduler.add_job(auto_escalate_tickets, CronTrigger(hour='*/6'))  # Ogni 6 ore
+
+        # Pianifica pulizia ticket vecchi ogni settimana
+        scheduler.add_job(cleanup_old_tickets, CronTrigger(day_of_week='mon', hour=4))  # Ogni lunedì alle 4:00
 
         # Start scheduler for notifications
         scheduler.start()
