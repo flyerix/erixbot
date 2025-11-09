@@ -25,6 +25,8 @@
     "cancel": "❌ Annulla"
   },
   "ticket": {
+    "menu_title": "🎫 Menu Ticket",
+    "menu_subtitle": "Cosa vuoi fare?",
     "created": "🎫 Ticket #{id} creato!",
     "ai_response": "🤖 Risposta AI:",
     "open_conversation": "💬 Questa conversazione rimane aperta!",
@@ -114,6 +116,10 @@
     "summary_pending": "⏳ In attesa di risoluzione"
   },
   "export": {
+    "choose_type": "📊 Scegli il tipo di esportazione:",
+    "tickets": "🎫 Esporta Ticket",
+    "notifications": "🔔 Esporta Notifiche",
+    "all_data": "📋 Esporta Tutto",
     "starting": "📊 Preparando l'esportazione dei tuoi dati...",
     "completed": "✅ Esportazione completata! I tuoi dati sono stati inviati.",
     "error": "❌ Errore durante l'esportazione. Riprova più tardi.",
