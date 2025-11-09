@@ -1,7 +1,7 @@
 """
 Database models for the bot application
 """
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index, Float
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Index, Float, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -32,7 +32,7 @@ class Ticket(Base):
     __tablename__ = 'tickets'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     title = Column(String)
     description = Column(Text)
     status = Column(String, default='open')  # open, escalated, closed, resolved
@@ -59,7 +59,7 @@ class TicketMessage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     ticket_id = Column(Integer, ForeignKey('tickets.id'))
-    user_id = Column(Integer)
+    user_id = Column(BigInteger)
     message = Column(Text)
     is_admin = Column(Boolean, default=False)
     is_ai = Column(Boolean, default=False)
@@ -71,7 +71,7 @@ class UserNotification(Base):
     __tablename__ = 'user_notifications'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     list_name = Column(String)
     days_before = Column(Integer)  # 1, 3, or 5 days before expiry
     # notification_type = Column(String, default='expiry')  # expiry, renewal, custom - removed for compatibility
@@ -87,7 +87,7 @@ class RenewalRequest(Base):
     __tablename__ = 'renewal_requests'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     list_name = Column(String)
     months = Column(Integer)
     cost = Column(String)
@@ -102,7 +102,7 @@ class TicketFeedback(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     ticket_id = Column(Integer, ForeignKey('tickets.id'))
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     rating = Column(Integer)  # 1-5 stars
     comment = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -111,7 +111,7 @@ class UserActivity(Base):
     __tablename__ = 'user_activities'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     action = Column(String)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     details = Column(Text)
@@ -136,7 +136,7 @@ class UserBehavior(Base):
     __tablename__ = 'user_behaviors'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, index=True)
+    user_id = Column(BigInteger, index=True)
     behavior_type = Column(String)  # renewal_pattern, ticket_frequency, response_time, etc.
     data = Column(Text)  # JSON data about the behavior
     last_updated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -145,7 +145,7 @@ class UserProfile(Base):
     __tablename__ = 'user_profiles'
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, unique=True, index=True)
+    user_id = Column(BigInteger, unique=True, index=True)
     theme = Column(String, default='light')  # light, dark
     language = Column(String, default='it')  # it, en
     timezone = Column(String, default='Europe/Rome')
