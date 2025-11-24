@@ -553,8 +553,7 @@ async def show_progress_indicator(update: Update, context, operation: str):
     """Mostra indicatore di progresso per operazioni lunghe"""
     try:
         progress_msg = await update.message.reply_text(
-            f"⏳ **{operation}...**\n\n💡 Operazione in corso, attendi qualche secondo.",
-            parse_mode='Markdown'
+            f"⏳ **{operation}...**\n\n💡 Operazione in corso, attendi qualche secondo."
         )
         return progress_msg
     except Exception as e:
@@ -586,7 +585,7 @@ def get_user_language(user_id):
 
     session = SessionLocal()
     try:
-        from models import UserProfile
+        from models import UserProfile, Base
         # Verifica se la tabella esiste prima di fare la query
         try:
             profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
@@ -595,10 +594,23 @@ def get_user_language(user_id):
             user_cache.set(cache_key, language, config.USER_CACHE_TTL)
             return language
         except Exception as e:
-            # Se la tabella non esiste, restituisci il default
-            logger.warning(f"UserProfile table not found, using default language: {e}")
-            user_cache.set(cache_key, 'it', config.USER_CACHE_TTL)
-            return 'it'
+            # Se la tabella non esiste, prova a crearla
+            logger.warning(f"UserProfile table not found, attempting to create it: {e}")
+            try:
+                # Crea la tabella UserProfile se non esiste
+                UserProfile.__table__.create(session.bind, checkfirst=True)
+                logger.info("UserProfile table created successfully")
+
+                # Riprova la query
+                profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+                language = profile.language if profile else 'it'
+                user_cache.set(cache_key, language, config.USER_CACHE_TTL)
+                return language
+            except Exception as create_e:
+                logger.error(f"Failed to create UserProfile table: {create_e}")
+                # Fallback al default
+                user_cache.set(cache_key, 'it', config.USER_CACHE_TTL)
+                return 'it'
     finally:
         session.close()
 
@@ -964,7 +976,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"{localization.get_text('admin.panel_title', user_lang)}\n\n{localization.get_text('admin.choose_section', user_lang)}", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(f"{localization.get_text('admin.panel_title', user_lang)}\n\n{localization.get_text('admin.choose_section', user_lang)}", reply_markup=reply_markup)
 
     elif data == 'search_list':
         await query.edit_message_text("🔍 Inserisci il nome esatto della lista che vuoi cercare:")
@@ -1019,7 +1031,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("⬅️ Indietro", callback_data='back_to_main')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(stats_text, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error in user_stats for user {user_id}: {str(e)}")
             user_lang = get_user_language(user_id)
@@ -1036,7 +1048,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(localization.get_text('export.choose_type', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(localization.get_text('export.choose_type', user_lang), reply_markup=reply_markup)
 
     elif data == 'admin_alert':
         if not is_admin(user_id):

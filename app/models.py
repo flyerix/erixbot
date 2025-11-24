@@ -220,7 +220,39 @@ class UptimePing(Base):
 # Create all tables
 def create_tables(engine):
     """Create all database tables"""
-    Base.metadata.create_all(bind=engine)
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Check existing tables
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
+        logger.info(f"Existing tables before creation: {existing_tables}")
+
+        logger.info("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+
+        # Check tables after creation
+        inspector = inspect(engine)
+        new_tables = inspector.get_table_names()
+        logger.info(f"Tables after creation: {new_tables}")
+
+        created_tables = set(new_tables) - set(existing_tables)
+        if created_tables:
+            logger.info(f"Created tables: {list(created_tables)}")
+        else:
+            logger.info("No new tables created (they may already exist)")
+
+        logger.info("Database tables creation process completed successfully")
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create database tables: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 # Export all models and utilities for imports
 __all__ = [
