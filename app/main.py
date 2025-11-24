@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import os
 import logging
 import sys
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # Configure logging for production
 logging.basicConfig(
@@ -16,11 +17,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def clean_database_url(database_url):
+    """
+    Clean DATABASE_URL by removing invalid psycopg2 connection parameters.
+    psycopg2 doesn't recognize parameters like read_timeout, write_timeout, etc.
+    """
+    if not database_url or 'postgresql' not in database_url:
+        return database_url
+
+    try:
+        # Parse the URL
+        parsed = urlparse(database_url)
+
+        # Get query parameters
+        query_params = parse_qs(parsed.query)
+
+        # Valid psycopg2 parameters (connection-level)
+        valid_params = {
+            'connect_timeout', 'sslmode', 'sslrootcert', 'sslcert', 'sslkey',
+            'application_name', 'client_encoding', 'options', 'fallback_application_name',
+            'keepalives', 'keepalives_idle', 'keepalives_interval', 'keepalives_count',
+            'tcp_user_timeout'
+        }
+
+        # Filter out invalid parameters
+        cleaned_params = {k: v for k, v in query_params.items() if k in valid_params}
+
+        # Reconstruct query string
+        cleaned_query = urlencode(cleaned_params, doseq=True) if cleaned_params else ''
+
+        # Reconstruct URL
+        cleaned_url = urlunparse((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            cleaned_query,
+            parsed.fragment
+        ))
+
+        # Log what was removed
+        removed_params = set(query_params.keys()) - set(cleaned_params.keys())
+        if removed_params:
+            logger.info(f"Removed invalid psycopg2 parameters from DATABASE_URL: {removed_params}")
+
+        return cleaned_url
+
+    except Exception as e:
+        logger.warning(f"Failed to clean DATABASE_URL: {e}. Using original URL.")
+        return database_url
+
 # Environment validation
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     logger.error("DATABASE_URL environment variable is required")
     raise ValueError("DATABASE_URL environment variable is required")
+
+# Clean DATABASE_URL to remove invalid psycopg2 parameters
+DATABASE_URL = clean_database_url(DATABASE_URL)
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 if not TELEGRAM_BOT_TOKEN:
@@ -40,11 +94,9 @@ engine = create_engine(
     pool_recycle=900,  # Recycle ogni 15 minuti (più frequente per stabilità)
     pool_pre_ping=True,  # Verifica connessioni prima dell'uso
     echo=False,  # Disabilita logging SQL in produzione
-    # Ottimizzazioni per bassa memoria
+    # Valid psycopg2 connect_args only
     connect_args={
         'connect_timeout': 10,
-        'read_timeout': 30,
-        'write_timeout': 30,
     } if 'postgresql' in DATABASE_URL else {}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
