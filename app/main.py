@@ -50,8 +50,8 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Import models directly (with --chdir, the root directory is in Python path)
-from models import SessionLocal as ModelsSessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior, Base, create_tables
-models = ModelsSessionLocal
+from models import List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior, Base, create_tables
+import models
 models.SessionLocal = SessionLocal
 
 # Create all tables using the centralized function
