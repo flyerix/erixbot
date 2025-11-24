@@ -3933,7 +3933,8 @@ async def run_bot_main_loop():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
     logger.info("📝 Registering callback query handlers...")
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert|export_data)$'))
+
+    # Register specific handlers first (higher priority) - patterns with parameters
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
@@ -3941,8 +3942,6 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern='^confirm_delete:'))
     application.add_handler(CallbackQueryHandler(notify_list_callback, pattern='^notify_list:'))
     application.add_handler(CallbackQueryHandler(notify_days_callback, pattern='^notify_days:'))
-    application.add_handler(CallbackQueryHandler(open_ticket_callback, pattern='^open_ticket$'))
-    application.add_handler(CallbackQueryHandler(my_tickets_callback, pattern='^my_tickets$'))
     application.add_handler(CallbackQueryHandler(view_ticket_callback, pattern='^view_ticket:'))
     application.add_handler(CallbackQueryHandler(reply_ticket_callback, pattern='^reply_ticket:'))
     application.add_handler(CallbackQueryHandler(close_ticket_callback, pattern='^close_ticket:'))
@@ -3950,18 +3949,26 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(close_ticket_user_callback, pattern='^close_ticket_user:'))
     application.add_handler(CallbackQueryHandler(escalate_ticket_callback, pattern='^escalate_ticket:'))
     application.add_handler(CallbackQueryHandler(contact_admin_callback, pattern='^contact_admin:'))
-    application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
-    application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
     application.add_handler(CallbackQueryHandler(select_list_callback, pattern='^select_list:'))
     application.add_handler(CallbackQueryHandler(edit_list_callback, pattern='^edit_list:'))
     application.add_handler(CallbackQueryHandler(edit_field_callback, pattern='^edit_field:'))
     application.add_handler(CallbackQueryHandler(delete_admin_list_callback, pattern='^delete_admin_list:'))
     application.add_handler(CallbackQueryHandler(confirm_admin_delete_callback, pattern='^confirm_admin_delete:'))
-    application.add_handler(CallbackQueryHandler(admin_tickets_callback, pattern='^admin_tickets$'))
     application.add_handler(CallbackQueryHandler(select_ticket_callback, pattern='^select_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_reply_ticket_callback, pattern='^admin_reply_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_close_ticket_callback, pattern='^admin_close_ticket:'))
     application.add_handler(CallbackQueryHandler(admin_contact_user_callback, pattern='^admin_contact_user:'))
+    application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
+    application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
+    application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
+    application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
+
+    # Register exact match handlers (medium priority) - specific menu buttons
+    application.add_handler(CallbackQueryHandler(open_ticket_callback, pattern='^open_ticket$'))
+    application.add_handler(CallbackQueryHandler(my_tickets_callback, pattern='^my_tickets$'))
+    application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
+    application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
+    application.add_handler(CallbackQueryHandler(admin_tickets_callback, pattern='^admin_tickets$'))
     application.add_handler(CallbackQueryHandler(admin_stats_callback, pattern='^admin_stats$'))
     application.add_handler(CallbackQueryHandler(admin_analytics_callback, pattern='^admin_analytics$'))
     application.add_handler(CallbackQueryHandler(admin_performance_callback, pattern='^admin_performance$'))
@@ -3969,13 +3976,12 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(admin_users_callback, pattern='^admin_users$'))
     application.add_handler(CallbackQueryHandler(admin_health_callback, pattern='^admin_health$'))
     application.add_handler(CallbackQueryHandler(admin_audit_callback, pattern='^admin_audit$'))
-    application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
-    application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
-    application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
-    application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
     application.add_handler(CallbackQueryHandler(export_tickets_callback, pattern='^export_tickets$'))
     application.add_handler(CallbackQueryHandler(export_notifications_callback, pattern='^export_notifications$'))
     application.add_handler(CallbackQueryHandler(export_all_callback, pattern='^export_all$'))
+
+    # Register generic button handler last (lowest priority) - catch-all for main menu buttons
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert|export_data)$'))
 
     logger.info("✅ All handlers registered successfully")
 
