@@ -928,9 +928,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {localization.get_text('help.admin_section', user_lang)}
 {localization.get_text('help.admin_desc', user_lang)}
 
-{localization.get_text('help.commands', user_lang)}
-{localization.get_text('help.commands_desc', user_lang)}
-
 {localization.get_text('help.tips', user_lang)}
 {localization.get_text('help.tips_desc', user_lang)}
 """
@@ -1152,26 +1149,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'help':
         user_lang = get_user_language(query.from_user.id)
         help_text = f"""
-{localization.get_text('help.title', user_lang)}
-
-{localization.get_text('help.search_section', user_lang)}
-{localization.get_text('help.search_desc', user_lang)}
-
-{localization.get_text('help.ticket_section', user_lang)}
-{localization.get_text('help.ticket_desc', user_lang)}
-
-{localization.get_text('help.notifications_section', user_lang)}
-{localization.get_text('help.notifications_desc', user_lang)}
-
-{localization.get_text('help.admin_section', user_lang)}
-{localization.get_text('help.admin_desc', user_lang)}
-
-{localization.get_text('help.commands', user_lang)}
-{localization.get_text('help.commands_desc', user_lang)}
-
-{localization.get_text('help.tips', user_lang)}
-{localization.get_text('help.tips_desc', user_lang)}
-"""
+    {localization.get_text('help.title', user_lang)}
+    
+    {localization.get_text('help.search_section', user_lang)}
+    {localization.get_text('help.search_desc', user_lang)}
+    
+    {localization.get_text('help.ticket_section', user_lang)}
+    {localization.get_text('help.ticket_desc', user_lang)}
+    
+    {localization.get_text('help.notifications_section', user_lang)}
+    {localization.get_text('help.notifications_desc', user_lang)}
+    
+    {localization.get_text('help.admin_section', user_lang)}
+    {localization.get_text('help.admin_desc', user_lang)}
+    
+    {localization.get_text('help.tips', user_lang)}
+    {localization.get_text('help.tips_desc', user_lang)}
+    """
         keyboard = [
             [InlineKeyboardButton(localization.get_button_text('create_ticket', user_lang), callback_data='ticket_menu')],
             [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
