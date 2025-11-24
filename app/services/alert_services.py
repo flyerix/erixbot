@@ -194,8 +194,7 @@ class AlertService:
                 bot = Bot(token=TELEGRAM_BOT_TOKEN)
                 await bot.send_message(
                     chat_id=admin_id,
-                    text=notification_message,
-                    parse_mode='Markdown'
+                    text=notification_message
                 )
                 logger.info(f"Alert notification sent to admin {admin_id}")
             except Exception as e:

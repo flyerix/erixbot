@@ -1094,8 +1094,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"⚠️ **Attenzione:** Questo messaggio verrà inviato a tutti gli utenti attivi.\n"
                 f"L'operazione non può essere annullata.\n\n"
                 f"Vuoi procedere?",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
+                reply_markup=reply_markup
             )
 
         finally:
@@ -1114,8 +1113,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             f"📝 **Scrivi il messaggio di allert**\n\n"
             f"📊 Verrà inviato a **{user_count} utenti**\n\n"
-            f"Scrivi il messaggio che vuoi inviare:",
-            parse_mode='Markdown'
+            f"Scrivi il messaggio che vuoi inviare:"
         )
         context.user_data['action'] = 'send_mass_alert'
 
@@ -1143,7 +1141,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(renewal_text, reply_markup=reply_markup)
             logger.info(f"Successfully displayed {len(renewals)} renewal requests to admin {user_id}")
         except Exception as e:
             logger.error(f"Error in admin_renewals for admin {user_id}: {str(e)}")
@@ -1248,7 +1246,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                await update.message.reply_text(response, reply_markup=reply_markup, parse_mode='Markdown')
+                await update.message.reply_text(response, reply_markup=reply_markup)
 
                 # Log successo ricerca
                 log_list_event(list_obj.name, "searched", user_id, "Found and displayed")
@@ -1346,8 +1344,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await update.message.reply_text(
                     f"{localization.get_text('ticket.created', user_lang, id=ticket.id)}\n\n{localization.get_text('ticket.ai_unable', user_lang)}\n\n{localization.get_text('ticket.admin_contact', user_lang)}\n\n{localization.get_text('ticket.add_details', user_lang)}",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
+                    reply_markup=reply_markup
                 )
 
                 # Notify all admins about the escalated ticket with retry logic
@@ -1370,8 +1367,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         await context.bot.send_message(
                             chat_id=admin_id,
-                            text=escalation_notification,
-                            parse_mode='Markdown'
+                            text=escalation_notification
                         )
                         admin_notifications_sent += 1
                         logger.info(f"✅ Escalation notification sent to admin {admin_id}")
@@ -1461,7 +1457,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 user_lang = get_user_language(user_id)
-                await update.message.reply_text(localization.get_text('renew.select_months', user_lang, name=list_obj.name), reply_markup=reply_markup, parse_mode='Markdown')
+                await update.message.reply_text(localization.get_text('renew.select_months', user_lang, name=list_obj.name), reply_markup=reply_markup)
             else:
                 user_lang = get_user_language(user_id)
                 await update.message.reply_text(localization.get_text('list.not_found', user_lang))
@@ -1523,8 +1519,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(
                         chat_id=user_id,
-                        text=alert_message,
-                        parse_mode='Markdown'
+                        text=alert_message
                     )
                     sent_count += 1
                     logger.info(f"✅ Mass alert sent to user {user_id}")
@@ -1546,7 +1541,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📅 **Data invio:** {datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')}
 """
 
-            await update.message.reply_text(report_message, parse_mode='Markdown')
+            await update.message.reply_text(report_message)
 
             # Log admin action
             log_admin_action(admin_id, "mass_alert_sent", None, f"Sent to {sent_count} users, failed: {failed_count}")
@@ -1625,8 +1620,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         try:
                             await context.bot.send_message(
                                 chat_id=admin_id,
-                                text=escalation_notification,
-                                parse_mode='Markdown'
+                                text=escalation_notification
                             )
                             logger.info(f"✅ Escalation notification sent to admin {admin_id}")
                         except Exception as e:
@@ -1817,7 +1811,7 @@ async def renew_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"🔄 Vuoi rinnovare **{list_name}** per quanti mesi?\n\n💰 Ogni mese costa €15", reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(f"🔄 Vuoi rinnovare **{list_name}** per quanti mesi?\n\n💰 Ogni mese costa €15", reply_markup=reply_markup)
 
 async def renew_months_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1832,7 +1826,7 @@ async def renew_months_callback(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("❌ Annulla", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"🔄 Confermi il rinnovo di **{list_name}** per **{months} mesi**?\n\n💰 Costo totale: **€{cost}**\n\nQuesta richiesta verrà inviata agli admin per l'approvazione.", reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(f"🔄 Confermi il rinnovo di **{list_name}** per **{months} mesi**?\n\n💰 Costo totale: **€{cost}**\n\nQuesta richiesta verrà inviata agli admin per l'approvazione.", reply_markup=reply_markup)
 
 async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1884,8 +1878,7 @@ async def confirm_renew_callback(update: Update, context: ContextTypes.DEFAULT_T
             try:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=admin_notification,
-                    parse_mode='Markdown'
+                    text=admin_notification
                 )
                 admin_notifications_sent += 1
                 logger.info(f"✅ Renewal notification sent to admin {admin_id}")
@@ -1926,7 +1919,7 @@ async def delete_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("❌ No, annulla", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup)
 
 async def confirm_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1949,7 +1942,7 @@ async def notify_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("⬅️ Annulla", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"🔔 Quando vuoi ricevere il promemoria per la scadenza di **{list_name}**?", reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(f"🔔 Quando vuoi ricevere il promemoria per la scadenza di **{list_name}**?", reply_markup=reply_markup)
 
 async def notify_days_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2008,7 +2001,7 @@ async def my_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='ticket_menu')])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(ticket_list, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(ticket_list, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2052,7 +2045,7 @@ async def view_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='my_tickets')])
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2145,8 +2138,7 @@ async def handle_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
                 try:
                     await context.bot.send_message(
                         chat_id=admin_id,
-                        text=escalation_notification,
-                        parse_mode='Markdown'
+                        text=escalation_notification
                     )
                     logger.info(f"✅ Escalation notification sent to admin {admin_id}")
                 except Exception as e:
@@ -2174,7 +2166,7 @@ async def close_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TY
             ticket.status = 'closed'
             session.commit()
 
-            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉", parse_mode='Markdown')
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉")
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -2211,7 +2203,7 @@ async def close_ticket_user_callback(update: Update, context: ContextTypes.DEFAU
             ticket.status = 'closed'
             session.commit()
 
-            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉", parse_mode='Markdown')
+            await query.edit_message_text("✅ **Ticket chiuso con successo!**\n\nGrazie per aver utilizzato il nostro servizio. 🎉")
         else:
             await query.edit_message_text("❌ Ticket non trovato.")
     finally:
@@ -2249,8 +2241,7 @@ async def escalate_ticket_callback(update: Update, context: ContextTypes.DEFAULT
                 try:
                     await context.bot.send_message(
                         chat_id=admin_id,
-                        text=escalation_notification,
-                        parse_mode='Markdown'
+                        text=escalation_notification
                     )
                     logger.info(f"✅ Escalation notification sent to admin {admin_id}")
                 except Exception as e:
@@ -2293,8 +2284,7 @@ async def contact_admin_callback(update: Update, context: ContextTypes.DEFAULT_T
                 try:
                     await context.bot.send_message(
                         chat_id=admin_id,
-                        text=escalation_notification,
-                        parse_mode='Markdown'
+                        text=escalation_notification
                     )
                     logger.info(f"✅ Escalation notification sent to admin {admin_id}")
                 except Exception as e:
@@ -2336,7 +2326,7 @@ async def admin_lists_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         keyboard.append([InlineKeyboardButton("➕ Crea Nuova Lista", callback_data='create_list')])
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(list_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(list_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2516,7 +2506,7 @@ async def select_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_lists')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"📋 **Lista Selezionata: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi fare con questa lista?", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(f"📋 **Lista Selezionata: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi fare con questa lista?", reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2547,7 +2537,7 @@ async def edit_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         expiry_str = list_obj.expiry_date.strftime("%d/%m/%Y") if list_obj.expiry_date else "N/A"
-        await query.edit_message_text(f"✏️ **Modifica Lista: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi modificare?", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(f"✏️ **Modifica Lista: {list_obj.name}**\n\n💰 Costo: {list_obj.cost}\n📅 Scadenza: {expiry_str}\n📝 Note: {list_obj.notes or 'Nessuna'}\n\nCosa vuoi modificare?", reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2598,7 +2588,7 @@ async def delete_admin_list_callback(update: Update, context: ContextTypes.DEFAU
             [InlineKeyboardButton("❌ No, annulla", callback_data=f'select_list:{list_id}')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_obj.name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_obj.name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2651,7 +2641,7 @@ async def admin_tickets_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2687,7 +2677,7 @@ async def select_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_tickets')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(ticket_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(ticket_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2786,8 +2776,7 @@ async def handle_admin_contact_message(update: Update, context: ContextTypes.DEF
 
         await context.bot.send_message(
             chat_id=user_id,
-            text=contact_message,
-            parse_mode='Markdown'
+            text=contact_message
         )
 
         # Add admin message to ticket
@@ -2857,7 +2846,7 @@ Cosa vuoi fare con questa richiesta?
             [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_renewals')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(renewal_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(renewal_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -2903,8 +2892,7 @@ Il rinnovo è stato elaborato con successo! 🎉"""
 
             await context.bot.send_message(
                 chat_id=renewal.user_id,
-                text=approval_message,
-                parse_mode='Markdown'
+                text=approval_message
             )
         except Exception as e:
             logger.error(f"Failed to notify user {renewal.user_id} about renewal approval: {str(e)}")
@@ -2955,8 +2943,7 @@ La tua richiesta di rinnovo è stata messa sotto revisione. Un amministratore ti
 
             await context.bot.send_message(
                 chat_id=renewal.user_id,
-                text=contest_message,
-                parse_mode='Markdown'
+                text=contest_message
             )
         except Exception as e:
             logger.error(f"Failed to notify user {renewal.user_id} about renewal contestation: {str(e)}")
@@ -3147,8 +3134,7 @@ La tua richiesta di rinnovo è stata rifiutata. Contatta l'assistenza per maggio
 
             await context.bot.send_message(
                 chat_id=renewal.user_id,
-                text=rejection_message,
-                parse_mode='Markdown'
+                text=rejection_message
             )
         except Exception as e:
             logger.error(f"Failed to notify user {renewal.user_id} about renewal rejection: {str(e)}")
@@ -3193,7 +3179,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(stats_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -3254,7 +3240,7 @@ async def admin_analytics_callback(update: Update, context: ContextTypes.DEFAULT
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(analytics_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(analytics_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -3302,7 +3288,7 @@ async def admin_performance_callback(update: Update, context: ContextTypes.DEFAU
 
     keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(performance_text, reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(performance_text, reply_markup=reply_markup)
 
 async def admin_revenue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Revenue & Renewals Dashboard"""
@@ -3360,7 +3346,7 @@ async def admin_revenue_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(revenue_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(revenue_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -3427,7 +3413,7 @@ async def admin_users_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(users_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(users_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -3484,7 +3470,7 @@ async def admin_health_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(health_text, reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(health_text, reply_markup=reply_markup)
 
 async def admin_audit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Audit & Logs Dashboard"""
@@ -3542,7 +3528,7 @@ async def admin_audit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
 
         keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(audit_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(audit_text, reply_markup=reply_markup)
     finally:
         session.close()
 
@@ -3796,7 +3782,7 @@ async def run_bot_main_loop():
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await update.message.reply_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await update.message.reply_text(status_text, reply_markup=reply_markup)
 
         finally:
             session.close()
@@ -3811,7 +3797,7 @@ async def run_bot_main_loop():
         user_lang = get_user_language(user_id)
 
         if not check_rate_limit(user_id, 'admin_action'):
-            await update.message.reply_text(localization.get_text('errors.rate_limit', user_lang), parse_mode='Markdown')
+            await update.message.reply_text(localization.get_text('errors.rate_limit', user_lang))
             return
 
         session = SessionLocal()
@@ -3861,7 +3847,7 @@ async def run_bot_main_loop():
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await update.message.reply_text(stats_text, reply_markup=reply_markup)
 
             # Log stats access
             log_user_action(user_id, "viewed_personal_stats")
@@ -3877,14 +3863,14 @@ async def run_bot_main_loop():
             return
 
         user_lang = get_user_language(user_id)
-        await update.message.reply_text(localization.get_text('renew.enter_name', user_lang), parse_mode='Markdown')
+        await update.message.reply_text(localization.get_text('renew.enter_name', user_lang))
         context.user_data['action'] = 'quick_renew'
 
     async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
 
         if not check_rate_limit(user_id):
-            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.", parse_mode='Markdown')
+            await update.message.reply_text("⚠️ **Troppe richieste!**\n\nAttendi qualche minuto prima di riprovare.")
             return
 
         keyboard = [
@@ -3897,7 +3883,7 @@ async def run_bot_main_loop():
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         user_lang = get_user_language(user_id)
-        await update.message.reply_text(localization.get_text('support.title', user_lang), reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(localization.get_text('support.title', user_lang), reply_markup=reply_markup)
 
     async def stop_contact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Stop direct contact with user"""
@@ -4067,8 +4053,7 @@ async def run_bot_main_loop():
                     test_message = "🤖 **Bot Status Check**\n\n✅ Bot avviato correttamente!\n⏰ " + datetime.now(italy_tz).strftime('%d/%m/%Y %H:%M')
                     await application.bot.send_message(
                         chat_id=ADMIN_IDS[0],
-                        text=test_message,
-                        parse_mode='Markdown'
+                        text=test_message
                     )
                     logger.info(f"✅ Test message sent to admin {ADMIN_IDS[0]}")
                 except Exception as msg_e:
