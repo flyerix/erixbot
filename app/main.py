@@ -277,7 +277,7 @@ if __name__ != '__main__':
                 from datetime import datetime, timezone
 
                 port = int(os.environ.get('PORT', 10000))
-                render_url = os.environ.get('RENDER_URL', f'http://localhost:{port}')
+                render_url = f'http://localhost:{port}'
                 endpoint = f"{render_url}/health"  # Use health check endpoint
                 interval_seconds = interval_minutes * 60
 
