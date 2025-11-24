@@ -1150,19 +1150,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_lang = get_user_language(query.from_user.id)
         help_text = f"""
     {localization.get_text('help.title', user_lang)}
-    
+
     {localization.get_text('help.search_section', user_lang)}
     {localization.get_text('help.search_desc', user_lang)}
-    
+
     {localization.get_text('help.ticket_section', user_lang)}
     {localization.get_text('help.ticket_desc', user_lang)}
-    
+
     {localization.get_text('help.notifications_section', user_lang)}
     {localization.get_text('help.notifications_desc', user_lang)}
-    
+
     {localization.get_text('help.admin_section', user_lang)}
     {localization.get_text('help.admin_desc', user_lang)}
-    
+
     {localization.get_text('help.tips', user_lang)}
     {localization.get_text('help.tips_desc', user_lang)}
     """
@@ -1171,7 +1171,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(localization.get_button_text('back', user_lang), callback_data='back_to_main')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode=None)
 
     elif data == 'back_to_main':
         prefix = get_user_prefix(user_id)
