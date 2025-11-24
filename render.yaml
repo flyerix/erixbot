@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: erixcastbot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 120 --access-logfile - --error-logfile - --chdir /opt/render/project/src app.main:app
+    healthCheckPath: /health
+    restartPolicy: on_failure
+    autoDeploy: true
+    # Enhanced configuration for 24/7 availability
+    maxShutdownDelaySeconds: 60
+    healthCheckTimeout: 30
+    # Environment variables for production deployment
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        fromSecret: telegram_bot_token
+      - key: DATABASE_URL
+        fromSecret: database_url
+      - key: OPENAI_API_KEY
+        fromSecret: openai_api_key
+      - key: ADMIN_IDS
+        fromSecret: admin_ids
+      - key: PORT
+        value: 10000
+      - key: WEBHOOK_URL
+        fromSecret: webhook_url
+      - key: RENDER_URL
+        fromSecret: render_url
+      - key: STARTUP_DELAY
+        value: 30
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_POOL_SIZE
+        value: 3
+      - key: DATABASE_MAX_OVERFLOW
+        value: 2
+      # Abilita webhook per efficienza massima (no polling)
+      - key: USE_WEBHOOK
+        value: true
