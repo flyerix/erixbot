@@ -585,8 +585,8 @@ def get_user_language(user_id):
 
     session = SessionLocal()
     try:
-        from models import UserProfile, Base
-        # Verifica se la tabella esiste prima di fare la query
+        from models import UserProfile
+        # Query the UserProfile table - assume it exists (created during deployment)
         try:
             profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
             language = profile.language if profile else 'it'
@@ -594,23 +594,11 @@ def get_user_language(user_id):
             user_cache.set(cache_key, language, config.USER_CACHE_TTL)
             return language
         except Exception as e:
-            # Se la tabella non esiste, prova a crearla
-            logger.warning(f"UserProfile table not found, attempting to create it: {e}")
-            try:
-                # Crea la tabella UserProfile se non esiste
-                UserProfile.__table__.create(session.bind, checkfirst=True)
-                logger.info("UserProfile table created successfully")
-
-                # Riprova la query
-                profile = session.query(UserProfile).filter(UserProfile.user_id == user_id).first()
-                language = profile.language if profile else 'it'
-                user_cache.set(cache_key, language, config.USER_CACHE_TTL)
-                return language
-            except Exception as create_e:
-                logger.error(f"Failed to create UserProfile table: {create_e}")
-                # Fallback al default
-                user_cache.set(cache_key, 'it', config.USER_CACHE_TTL)
-                return 'it'
+            # If table doesn't exist or query fails, log warning and use default
+            logger.warning(f"UserProfile table query failed, using default language 'it': {e}")
+            # Cache the default to avoid repeated failures
+            user_cache.set(cache_key, 'it', config.USER_CACHE_TTL)
+            return 'it'
     finally:
         session.close()
 
@@ -1022,7 +1010,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for notif in notifications:
                     lst = session.query(List).filter(List.name == notif.list_name).first()
                     if lst and lst.expiry_date:
-                        days_until = (lst.expiry_date - datetime.now(timezone.utc)).days
+                        # Ensure consistent timezone handling - convert to UTC-aware if naive
+                        if lst.expiry_date.tzinfo is None:
+                            # Assume naive datetimes are in UTC (database default)
+                            expiry_aware = lst.expiry_date.replace(tzinfo=timezone.utc)
+                        else:
+                            expiry_aware = lst.expiry_date
+    
+                        # Calculate days until expiry in UTC
+                        now_utc = datetime.now(timezone.utc)
+                        days_until = (expiry_aware - now_utc).days
                         if days_until >= 0:
                             stats_text += f"• {lst.name}: {days_until} giorni\n"
 
