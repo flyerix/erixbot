@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python external_pinger.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+
+[env]
+TARGET_URL = "https://erixcastbot.onrender.com"
+PING_INTERVAL = "300"
+PORT = "5000"

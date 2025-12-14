@@ -1,0 +1,161 @@
+{
+  "welcome": {
+    "title": "🎉 Benvenuto nel Bot di Gestione Liste!",
+    "stats": "📊 Statistiche Sistema:",
+    "active_lists": "📋 Liste attive: {count}",
+    "open_tickets": "🎫 Ticket aperti: {count}",
+    "actions": "💡 Cosa posso fare per te?"
+  },
+  "buttons": {
+    "search_list": "🔍 Cerca Lista",
+    "ticket_support": "🎫 Ticket Assistenza",
+    "personal_dashboard": "📊 Dashboard Personale",
+    "help_guide": "❓ Guida & Aiuto",
+    "admin_panel": "⚙️ Admin Panel",
+    "back": "⬅️ Indietro",
+    "continue": "💬 Continua Conversazione",
+    "close_ticket": "✅ Problema Risolto",
+    "contact_admin": "👨‍💼 Parla con Admin",
+    "create_ticket": "📝 Apri Nuovo Ticket",
+    "my_tickets": "📋 I Miei Ticket",
+    "renew": "📝 Richiedi Rinnovo",
+    "delete": "🗑️ Elimina",
+    "notifications": "🔔 Notifiche Scadenza",
+    "confirm": "✅ Conferma",
+    "cancel": "❌ Annulla",
+    "export_tickets": "🎫 Esporta Ticket",
+    "export_notifications": "🔔 Esporta Notifiche",
+    "export_all": "📋 Esporta Tutto",
+    "add_details": "📝 Aggiungi Dettagli",
+    "reply": "💬 Rispondi",
+    "view_tickets": "👀 Visualizza Ticket"
+  },
+  "ticket": {
+    "menu_title": "🎫 Menu Ticket\n\nCosa vuoi fare?",
+    "menu_subtitle": "Cosa vuoi fare?",
+    "created": "🎫 Ticket #{id} creato!",
+    "ai_response": "🤖 Risposta AI:",
+    "open_conversation": "💬 Questa conversazione rimane aperta!",
+    "escalated": "👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.",
+    "closed": "✅ Ticket chiuso con successo!",
+    "reply_added": "💬 Risposta aggiunta al ticket #{id}!",
+    "escalated_followup": "Il tuo problema richiede assistenza umana. Un admin ti contatterà presto!",
+    "auto_escalated": "🤖➡️👨‍💼 L'AI non è riuscita a risolvere il problema dopo 2 tentativi. Ticket automaticamente inviato agli admin.",
+    "ai_attempts_exceeded": "⚠️ L'AI ha raggiunto il limite di 2 tentativi. Un amministratore ti contatterà per assistenza specializzata.",
+    "ai_unable": "🤖 L'AI non è in grado di risolvere questo problema.",
+    "admin_contact": "👨‍💼 Un amministratore ti contatterà presto per assistenza personalizzata.",
+    "add_details": "📝 Puoi aggiungere altri dettagli al ticket scrivendo messaggi qui.",
+    "enter_title": "📝 Inserisci il titolo del tuo problema:",
+    "describe_problem": "📝 Descrivi il problema in dettaglio:",
+    "enter_reply": "💬 Scrivi la tua risposta al ticket:",
+    "details": "🎫 **Dettagli Ticket #{id}**\n📝 Titolo: {title}\n📄 Descrizione: {description}\n📊 Stato: {status}\n👤 User: {user_id}\n\n💬 **Messaggi:**",
+    "messages": "Messaggi del Ticket",
+    "summary": "Riepilogo Conversazione"
+  },
+  "help": {
+    "title": "❓ Guida Completa del Bot",
+    "search_section": "🔍 Cerca Liste:",
+    "search_desc": "• Inserisci il nome esatto della lista\n• Visualizza dettagli completi\n• Gestisci rinnovi e notifiche",
+    "ticket_section": "🎫 Sistema Ticket:",
+    "ticket_desc": "• Apri ticket per problemi tecnici\n• L'AI risponde automaticamente\n• Continua la conversazione se necessario\n• Gli admin intervengono per problemi complessi",
+    "notifications_section": "🔔 Notifiche Scadenza:",
+    "notifications_desc": "• Imposta promemoria personalizzati\n• 1, 3 o 5 giorni prima della scadenza\n• Ricevi alert automatici",
+    "admin_section": "⚙️ Admin Panel (Solo Admin):",
+    "admin_desc": "• Gestisci tutte le liste\n• Monitora i ticket\n• Visualizza statistiche\n• Backup e manutenzione",
+    "tips": "💡 Suggerimenti:",
+    "tips_desc": "• Usa i comandi /start per tornare al menu\n• Le risposte AI sono automatiche ma accurate\n• Gli admin sono sempre disponibili per supporto"
+  },
+  "list": {
+    "found": "📋 Lista Trovata!",
+    "name": "📝 Nome: {name}",
+    "cost": "💰 Costo: {cost}",
+    "expiry": "📅 Scadenza: {date}",
+    "notes": "📝 Note: {notes}",
+    "actions": "Cosa vuoi fare con questa lista?",
+    "not_found": "❌ Lista non trovata. Assicurati di aver scritto il nome esatto.",
+    "created": "✅ Lista {name} creata con successo!",
+    "updated": "✅ Campo {field} aggiornato con successo!",
+    "deleted": "✅ Lista {name} eliminata con successo!"
+  },
+  "renewal": {
+    "confirm": "🔄 Confermi il rinnovo di {list} per {months} mesi?",
+    "cost": "💰 Costo totale: €{cost}",
+    "submitted": "✅ Richiesta di rinnovo inviata!",
+    "approved": "✅ Richiesta di rinnovo approvata!",
+    "rejected": "❌ Richiesta di rinnovo rifiutata",
+    "contested": "⏳ Richiesta di rinnovo in revisione"
+  },
+  "notifications": {
+    "set": "✅ Notifica impostata! Riceverai un promemoria {days} giorni prima della scadenza di {list}.",
+    "reminder": "🔔 Promemoria Scadenza Lista",
+    "expires_soon": "📋 Lista: {list}\n💰 Costo: {cost}\n📅 Scade tra: {days} giorni\n📆 Data scadenza: {date}\n\n⚡ Rinnova ora per evitare interruzioni!"
+  },
+  "notification": {
+    "expiry_reminder": "🔔 Promemoria Scadenza Lista",
+    "list_name": "📋 Lista: {name}",
+    "cost": "💰 Costo: {cost}",
+    "days_until": "📅 Scade tra: {days} giorni",
+    "expiry_date": "📆 Data scadenza: {date}",
+    "renew_now": "⚡ Rinnova ora per evitare interruzioni!",
+    "use_renew": "Usa il comando /renew per rinnovare"
+  },
+  "reminder": {
+    "inactive_user": "👋 Ciao! Non ti vediamo da un po'...",
+    "active_lists": "Hai {count} liste attive che potrebbero aver bisogno di attenzione.",
+    "check_status": "Controlla lo stato delle tue liste con /status",
+    "contact_support": "Se hai problemi, contatta il supporto con /support"
+  },
+  "stats": {
+    "title": "📊 Le Tue Statistiche",
+    "tickets_total": "🎫 Ticket totali: {count}",
+    "tickets_open": "🎫 Ticket aperti: {count}",
+    "notifications_active": "🔔 Notifiche attive: {count}",
+    "lists_monitored": "📋 Liste monitorate: {count}",
+    "upcoming_expiries": "💡 Prossime scadenze:"
+  },
+  "admin": {
+    "panel_title": "👑 Admin Dashboard - Business Intelligence",
+    "choose_section": "Scegli una sezione per analisi dettagliate:",
+    "lists_management": "📋 Gestisci Liste",
+    "tickets_management": "🎫 Ticket Management",
+    "renewals_management": "🔄 Richieste Rinnovo",
+    "analytics": "📊 Analytics & Metrics",
+    "performance": "📈 Performance Monitor",
+    "revenue": "💰 Revenue & Renewals",
+    "users": "👥 User Management",
+    "health": "🔧 System Health",
+    "audit": "📋 Audit & Logs",
+    "mass_alert": "🚨 ALLERT - Messaggio di Massa"
+  },
+  "errors": {
+    "generic": "❌ Si è verificato un errore. Riprova più tardi.",
+    "not_found": "❌ {item} non trovato.",
+    "access_denied": "❌ Accesso negato!",
+    "rate_limit": "⚠️ Troppe richieste! Attendi qualche minuto prima di riprovare.",
+    "invalid_input": "❌ Input non valido. Riprova con testo diverso.",
+    "empty_title": "❌ Il titolo del ticket non può essere vuoto.",
+    "empty_description": "❌ La descrizione del ticket non può essere vuota.",
+    "invalid_date": "❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)",
+    "ticket_not_authorized": "❌ Ticket non trovato o non autorizzato.",
+    "stats_error": "❌ Errore nel caricamento delle statistiche. Riprova più tardi."
+  },
+  "ai": {
+    "summarizing": "🤖 Sto creando un riepilogo del ticket...",
+    "summary_title": "📋 Riepilogo Ticket #{id}",
+    "summary_created": "📅 Creato: {date}",
+    "summary_status": "📊 Stato: {status}",
+    "summary_issue": "❓ Problema: {issue}",
+    "summary_resolution": "✅ Risoluzione: {resolution}",
+    "summary_pending": "⏳ In attesa di risoluzione"
+  },
+  "export": {
+    "choose_type": "📊 Scegli il tipo di esportazione:",
+    "tickets": "🎫 Esporta Ticket",
+    "notifications": "🔔 Esporta Notifiche",
+    "all_data": "📋 Esporta Tutto",
+    "starting": "📊 Preparando l'esportazione dei tuoi dati...",
+    "completed": "✅ Esportazione completata! I tuoi dati sono stati inviati.",
+    "error": "❌ Errore durante l'esportazione. Riprova più tardi.",
+    "no_data": "📭 Nessun dato da esportare trovato."
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "welcome": {
+    "title": "🎉 Welcome to the List Management Bot!",
+    "stats": "📊 System Statistics:",
+    "active_lists": "📋 Active lists: {count}",
+    "open_tickets": "🎫 Open tickets: {count}",
+    "actions": "💡 What can I do for you?"
+  },
+  "buttons": {
+    "search_list": "🔍 Search List",
+    "ticket_support": "🎫 Support Ticket",
+    "personal_dashboard": "📊 Personal Dashboard",
+    "help_guide": "❓ Help & Guide",
+    "admin_panel": "⚙️ Admin Panel",
+    "back": "⬅️ Back",
+    "continue": "💬 Continue Conversation",
+    "close_ticket": "✅ Problem Solved",
+    "contact_admin": "👨‍💼 Contact Admin",
+    "create_ticket": "📝 Open New Ticket",
+    "my_tickets": "📋 My Tickets",
+    "renew": "📝 Request Renewal",
+    "delete": "🗑️ Delete",
+    "notifications": "🔔 Expiry Notifications",
+    "confirm": "✅ Confirm",
+    "cancel": "❌ Cancel",
+    "export_tickets": "🎫 Export Tickets",
+    "export_notifications": "🔔 Export Notifications",
+    "export_all": "📋 Export All",
+    "add_details": "📝 Add Details",
+    "reply": "💬 Reply",
+    "view_tickets": "👀 View Tickets"
+  },
+  "ticket": {
+    "created": "🎫 Ticket #{id} created!",
+    "ai_response": "🤖 AI Response:",
+    "open_conversation": "💬 This conversation remains open!",
+    "escalated": "👨‍💼 An administrator will contact you soon for personalized assistance.",
+    "closed": "✅ Ticket closed successfully!",
+    "reply_added": "💬 Reply added to ticket #{id}!",
+    "escalated_followup": "Your problem requires human assistance. An admin will contact you soon!",
+    "auto_escalated": "🤖➡️👨‍💼 AI couldn't solve the problem after 2 attempts. Ticket automatically sent to admins.",
+    "ai_attempts_exceeded": "⚠️ AI has reached the limit of 2 attempts. An administrator will contact you for specialized assistance."
+  },
+  "help": {
+    "title": "❓ Complete Bot Guide",
+    "search_section": "🔍 Search Lists:",
+    "search_desc": "• Enter the exact list name\n• View complete details\n• Manage renewals and notifications",
+    "ticket_section": "🎫 Ticket System:",
+    "ticket_desc": "• Open tickets for technical problems\n• AI responds automatically\n• Continue conversation if needed\n• Admins intervene for complex problems",
+    "notifications_section": "🔔 Expiry Notifications:",
+    "notifications_desc": "• Set personalized reminders\n• 1, 3 or 5 days before expiry\n• Receive automatic alerts",
+    "admin_section": "⚙️ Admin Panel (Admin Only):",
+    "admin_desc": "• Manage all lists\n• Monitor tickets\n• View statistics\n• Backup and maintenance",
+    "tips": "💡 Tips:",
+    "tips_desc": "• Use /start commands to return to menu\n• AI responses are automatic but accurate\n• Admins are always available for support"
+  },
+  "list": {
+    "found": "📋 List Found!",
+    "name": "📝 Name: {name}",
+    "cost": "💰 Cost: {cost}",
+    "expiry": "📅 Expiry: {date}",
+    "notes": "📝 Notes: {notes}",
+    "actions": "What do you want to do with this list?",
+    "not_found": "❌ List not found. Make sure you entered the exact name.",
+    "created": "✅ List {name} created successfully!",
+    "updated": "✅ Field {field} updated successfully!",
+    "deleted": "✅ List {name} deleted successfully!"
+  },
+  "renewal": {
+    "confirm": "🔄 Do you confirm renewal of {list} for {months} months?",
+    "cost": "💰 Total cost: €{cost}",
+    "submitted": "✅ Renewal request submitted!",
+    "approved": "✅ Renewal request approved!",
+    "rejected": "❌ Renewal request rejected",
+    "contested": "⏳ Renewal request under review"
+  },
+  "notifications": {
+    "set": "✅ Notification set! You will receive a reminder {days} days before {list} expires.",
+    "reminder": "🔔 List Expiry Reminder",
+    "expires_soon": "📋 List: {list}\n💰 Cost: {cost}\n📅 Expires in: {days} days\n📆 Expiry date: {date}\n\n⚡ Renew now to avoid interruptions!"
+  },
+  "notification": {
+    "expiry_reminder": "🔔 List Expiry Reminder",
+    "list_name": "📋 List: {name}",
+    "cost": "💰 Cost: {cost}",
+    "days_until": "📅 Expires in: {days} days",
+    "expiry_date": "📆 Expiry date: {date}",
+    "renew_now": "⚡ Renew now to avoid interruptions!",
+    "use_renew": "Use /renew command to renew"
+  },
+  "reminder": {
+    "inactive_user": "👋 Hi! We haven't seen you in a while...",
+    "active_lists": "You have {count} active lists that might need attention.",
+    "check_status": "Check your lists status with /status",
+    "contact_support": "If you have problems, contact support with /support"
+  },
+  "stats": {
+    "title": "📊 Your Statistics",
+    "tickets_total": "🎫 Total tickets: {count}",
+    "tickets_open": "🎫 Open tickets: {count}",
+    "notifications_active": "🔔 Active notifications: {count}",
+    "lists_monitored": "📋 Lists monitored: {count}",
+    "upcoming_expiries": "💡 Upcoming expiries:"
+  },
+  "admin": {
+    "panel_title": "👑 Admin Dashboard - Business Intelligence",
+    "choose_section": "Choose a section for detailed analysis:",
+    "lists_management": "📋 Manage Lists",
+    "tickets_management": "🎫 Ticket Management",
+    "renewals_management": "🔄 Renewal Requests",
+    "analytics": "📊 Analytics & Metrics",
+    "performance": "📈 Performance Monitor",
+    "revenue": "💰 Revenue & Renewals",
+    "users": "👥 User Management",
+    "health": "🔧 System Health",
+    "audit": "📋 Audit & Logs",
+    "mass_alert": "🚨 MASS ALERT - Broadcast Message"
+  },
+  "errors": {
+    "generic": "❌ An error occurred. Please try again later.",
+    "not_found": "❌ {item} not found.",
+    "access_denied": "❌ Access denied!",
+    "rate_limit": "⚠️ Too many requests! Please wait a few minutes before trying again.",
+    "invalid_input": "❌ Invalid input. Please try with different text.",
+    "empty_title": "❌ Ticket title cannot be empty.",
+    "empty_description": "❌ Ticket description cannot be empty.",
+    "invalid_date": "❌ Invalid date format. Use DD/MM/YYYY (e.g.: 31/12/2024)",
+    "ticket_not_authorized": "❌ Ticket not found or not authorized.",
+    "stats_error": "❌ Error loading statistics. Please try again later."
+  },
+  "ai": {
+    "summarizing": "🤖 Creating a summary of the ticket...",
+    "summary_title": "📋 Ticket Summary #{id}",
+    "summary_created": "📅 Created: {date}",
+    "summary_status": "📊 Status: {status}",
+    "summary_issue": "❓ Issue: {issue}",
+    "summary_resolution": "✅ Resolution: {resolution}",
+    "summary_pending": "⏳ Pending resolution"
+  },
+  "export": {
+    "starting": "📊 Preparing your data export...",
+    "completed": "✅ Export completed! Your data has been sent.",
+    "error": "❌ Error during export. Please try again later.",
+    "no_data": "📭 No data found to export."
+  }
+}
