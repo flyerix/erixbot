@@ -256,10 +256,135 @@ def create_tables(engine):
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise
 
+class AIKnowledge(Base):
+    __tablename__ = 'ai_knowledge'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    problem_key = Column(String, index=True)  # Categorized problem type
+    solution_text = Column(Text)  # Successful solution
+    success_count = Column(Integer, default=1)  # How many times this worked
+    keywords = Column(Text)  # JSON array of keywords
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    __table_args__ = (
+        Index('idx_ai_knowledge_problem', 'problem_key'),
+        Index('idx_ai_knowledge_success', 'success_count'),
+    )
+
+class UserPreferences(Base):
+    __tablename__ = 'user_preferences'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, unique=True, index=True)
+    theme = Column(String, default='default')  # UI theme
+    language = Column(String, default='it')  # User language
+    notifications_enabled = Column(Boolean, default=True)
+    notification_types = Column(Text)  # JSON array of enabled notification types
+    optimal_notification_hour = Column(Integer, default=10)  # Best time for notifications
+    shortcuts = Column(Text)  # JSON array of custom shortcuts
+    list_preferences = Column(Text)  # JSON object with list viewing preferences
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    
+    __table_args__ = (
+        Index('idx_user_preferences_user', 'user_id'),
+    )
+
+class SecurityLog(Base):
+    __tablename__ = 'security_logs'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, index=True)
+    event_type = Column(String, index=True)  # rate_limit, spam_detected, blocked, etc.
+    risk_score = Column(Integer, default=0)
+    details = Column(Text)  # JSON with event details
+    ip_address = Column(String)  # If available
+    user_agent = Column(String)  # If available
+    action_taken = Column(String)  # block, warn, monitor, etc.
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    __table_args__ = (
+        Index('idx_security_logs_user', 'user_id'),
+        Index('idx_security_logs_type', 'event_type'),
+        Index('idx_security_logs_date', 'created_at'),
+    )
+
+class AutomationLog(Base):
+    __tablename__ = 'automation_logs'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    automation_type = Column(String, index=True)  # backup, cleanup, optimization, etc.
+    status = Column(String, index=True)  # completed, failed, in_progress
+    details = Column(Text)  # JSON with automation details
+    execution_time = Column(Float)  # Execution time in seconds
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    __table_args__ = (
+        Index('idx_automation_logs_type', 'automation_type'),
+        Index('idx_automation_logs_status', 'status'),
+        Index('idx_automation_logs_date', 'created_at'),
+    )
+
+class NotificationQueue(Base):
+    __tablename__ = 'notification_queue'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, index=True)
+    notification_type = Column(String, index=True)
+    title = Column(String)
+    message = Column(Text)
+    priority = Column(String, default='normal')  # low, normal, high, urgent
+    scheduled_for = Column(DateTime)  # When to send
+    status = Column(String, default='pending')  # pending, sent, failed, cancelled
+    attempts = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    sent_at = Column(DateTime)
+    
+    __table_args__ = (
+        Index('idx_notification_queue_user', 'user_id'),
+        Index('idx_notification_queue_status', 'status'),
+        Index('idx_notification_queue_scheduled', 'scheduled_for'),
+    )
+
+class BackupLog(Base):
+    __tablename__ = 'backup_logs'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    backup_type = Column(String, index=True)  # full, incremental, smart
+    status = Column(String, index=True)  # completed, failed, in_progress
+    file_count = Column(Integer, default=0)
+    backup_size = Column(BigInteger, default=0)  # Size in bytes
+    backup_path = Column(String)
+    duration = Column(Float)  # Duration in seconds
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    __table_args__ = (
+        Index('idx_backup_logs_type', 'backup_type'),
+        Index('idx_backup_logs_status', 'status'),
+        Index('idx_backup_logs_date', 'created_at'),
+    )
+
+class TrustScore(Base):
+    __tablename__ = 'trust_scores'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, unique=True, index=True)
+    score = Column(Integer, default=50)  # 0-100 trust score
+    last_calculated = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    factors = Column(Text)  # JSON with factors that influenced the score
+    
+    __table_args__ = (
+        Index('idx_trust_scores_score', 'score'),
+    )
+
 # Export all models and utilities for imports
 __all__ = [
     'SessionLocal', 'List', 'Ticket', 'TicketMessage', 'UserNotification',
     'RenewalRequest', 'TicketFeedback', 'UserActivity', 'AuditLog',
     'UserBehavior', 'UserProfile', 'SystemMetrics', 'FeatureFlag', 'Alert',
-    'UptimePing', 'Base', 'create_tables'
+    'UptimePing', 'AIKnowledge', 'UserPreferences', 'SecurityLog', 
+    'AutomationLog', 'NotificationQueue', 'BackupLog', 'TrustScore',
+    'Base', 'create_tables'
 ]
