@@ -8,29 +8,29 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 import pytz
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog, UserBehavior
-from utils.validation import sanitize_text, validate_and_sanitize_input
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
+from utils.validation import sanitize_text
 from utils.rate_limiting import rate_limiter
 from utils.metrics import metrics_collector
 from services.ai_services import ai_service
 from services.task_manager import task_manager
 from services.memory_manager import memory_manager
-from services.analytics_service import analytics_service
-from services.smart_ai_service import smart_ai_service
-from services.smart_notifications import smart_notification_service
-from services.security_service import security_service
-from services.ui_service import ui_service
-from services.automation_service import automation_service
-from services.multi_tenant_service import multi_tenant_service
-from services.gamification_service import gamification_service
-from services.integration_service import integration_service
+# Import dei nuovi servizi (commentati per ora per evitare errori di import)
+# from services.analytics_service import analytics_service
+# from services.smart_ai_service import smart_ai_service
+# from services.smart_notifications import smart_notification_service
+# from services.security_service import security_service
+# from services.ui_service import ui_service
+# from services.automation_service import automation_service
+# from services.multi_tenant_service import multi_tenant_service
+# from services.gamification_service import gamification_service
+# from services.integration_service import integration_service
 from locales import localization
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import signal
 import sys
 import asyncio
-import uuid
 from collections import defaultdict
 
 load_dotenv()

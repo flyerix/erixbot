@@ -585,6 +585,7 @@ class AutomationService:
             return psutil.virtual_memory().percent
         except ImportError:
             # Fallback if psutil not available
+            logger.warning("psutil not available, using fallback memory usage")
             return 50  # Assume moderate usage
         except Exception as e:
             logger.error(f"Error getting memory usage: {e}")

@@ -7,8 +7,12 @@ import logging
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import and_, desc
-from models import SessionLocal, Ticket, TicketMessage, UserActivity
-from services.ai_services import ai_service
+from models import SessionLocal, Ticket, TicketMessage
+# Import condizionale per evitare errori
+try:
+    from services.ai_services import ai_service
+except ImportError:
+    ai_service = None
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -123,7 +127,10 @@ class SmartAIService:
             )
             
             # Get AI response
-            response = ai_service.get_response(enhanced_prompt)
+            if ai_service:
+                response = ai_service.get_response(enhanced_prompt)
+            else:
+                response = "Servizio AI temporaneamente non disponibile. Riprova più tardi."
             
             # Learn from this interaction
             self._learn_from_interaction(user_id, message, response)
@@ -132,7 +139,7 @@ class SmartAIService:
             
         except Exception as e:
             logger.error(f"Error getting contextual response: {e}")
-            return ai_service.get_response(message)  # Fallback to basic AI
+            return ai_service.get_response(message) if ai_service else "Servizio AI non disponibile"  # Fallback to basic AI
     
     def _build_user_context(self, user_id):
         """Build context for specific user"""

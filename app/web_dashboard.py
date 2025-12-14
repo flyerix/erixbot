@@ -2,14 +2,26 @@
 Web Dashboard for ErixCast Bot Analytics
 Simple Flask-based dashboard for admin analytics
 """
-from flask import Flask, render_template_string, jsonify, request
-from services.analytics_service import analytics_service
+try:
+    from flask import Flask, render_template_string, jsonify
+    flask_available = True
+except ImportError:
+    flask_available = False
+    Flask = None
+
+try:
+    from services.analytics_service import analytics_service
+except ImportError:
+    analytics_service = None
 import os
 import logging
 
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+if flask_available:
+    app = Flask(__name__)
+else:
+    app = None
 
 # Dashboard HTML template
 DASHBOARD_HTML = """
@@ -266,5 +278,8 @@ def health_check():
     return jsonify({'status': 'healthy', 'service': 'dashboard'})
 
 if __name__ == '__main__':
-    port = int(os.getenv('DASHBOARD_PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    if flask_available and app:
+        port = int(os.getenv('DASHBOARD_PORT', 5001))
+        app.run(host='0.0.0.0', port=port, debug=False)
+    else:
+        print("Flask not available, dashboard cannot start")

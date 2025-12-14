@@ -7,8 +7,11 @@ from datetime import datetime, timezone, timedelta
 import json
 import os
 import asyncio
-import aiohttp
-from models import SessionLocal, List, Ticket, UserActivity
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
+from models import SessionLocal, List
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +275,9 @@ class IntegrationService:
             }
             
             results = []
+            if not aiohttp:
+                return False, "aiohttp not available for webhook requests"
+            
             async with aiohttp.ClientSession() as session:
                 for name, url in endpoints.items():
                     if not url:
@@ -282,7 +288,7 @@ class IntegrationService:
                             url,
                             json=webhook_data,
                             headers={'Content-Type': 'application/json'},
-                            timeout=aiohttp.ClientTimeout(total=10)
+                            timeout=aiohttp.ClientTimeout(total=10) if aiohttp else None
                         ) as response:
                             if response.status == 200:
                                 results.append(f"{name}: success")
