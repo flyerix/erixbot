@@ -4662,10 +4662,6 @@ async def run_bot_main_loop():
                 logger.info("⏳ Waiting 30 seconds before restart to avoid rapid conflicts...")
                 await asyncio.sleep(30)
                 
-                # Stop the current application
-                if hasattr(application, 'stop'):
-                    await application.stop()
-                
                 logger.critical("🔄 Conflict resolved - triggering clean restart")
                 
             except Exception as resolution_error:
@@ -5090,20 +5086,13 @@ async def run_bot_main_loop():
             
                         logger.debug("Webhook mode active - bot ready")
                 finally:
-                    # Cleanup webhook mode
-                    await application.stop()
-                    await application.shutdown()
+                    # Cleanup webhook mode - let run_polling handle cleanup
+                    logger.info("🔄 Webhook mode cleanup")
 
             except Exception as webhook_e:
                 logger.error(f"❌ Failed to set webhook: {webhook_e}")
                 logger.info("🔄 Falling back to polling mode...")
                 USE_WEBHOOK = False
-                # Stop the application to restart in polling mode
-                await application.stop()
-                await application.shutdown()
-                # Reinitialize for polling
-                await application.initialize()
-                await application.start()
 
         if not USE_WEBHOOK:
             # Use polling (fallback or default)
@@ -5187,50 +5176,25 @@ async def run_bot_main_loop():
                 raise
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
-        # Proper cleanup before returning
-        try:
-            # Stop the application properly if it exists
-            if 'application' in locals() and application:
-                # Don't await here as we're not in async context
-                logger.info("🛑 Stopping application...")
-        except Exception as cleanup_e:
-            logger.error(f"Error during cleanup: {cleanup_e}")
+        # Simple cleanup - no application manipulation
+        logger.info("🛑 Bot main loop ended")
         
         # Don't re-raise the exception to avoid triggering Render's restart policy
         # Instead, let the retry mechanism handle it
         return
 
 def main():
-    """Simplified main function to avoid event loop issues"""
-    logger.info("🚀 Starting ErixCast bot (simplified version)...")
+    """Ultra-simplified main function - no event loop manipulation"""
+    logger.info("🚀 Starting ErixCast bot (ultra-simplified version)...")
     
     import asyncio
     import sys
     
-    # Simple approach - just run the bot once
+    # Ultra-simple approach - let asyncio.run handle everything
     try:
-        # Create fresh event loop
-        try:
-            # Close any existing loop
-            try:
-                old_loop = asyncio.get_event_loop()
-                if not old_loop.is_closed():
-                    old_loop.close()
-            except:
-                pass
-            
-            # Create new loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-        except Exception as loop_e:
-            logger.warning(f"Event loop setup warning: {loop_e}")
-            # Fallback - use default loop
-            loop = asyncio.get_event_loop()
-        
         logger.info("▶️ Starting bot main loop...")
-        loop.run_until_complete(run_bot_main_loop())
-        
+        # Use asyncio.run which handles event loop creation/cleanup automatically
+        asyncio.run(run_bot_main_loop())
         logger.info("✅ Bot completed successfully")
         
     except KeyboardInterrupt:
@@ -5240,7 +5204,7 @@ def main():
         # Exit cleanly to let Render restart
         sys.exit(1)
     finally:
-        # Cleanup
+        # Cleanup only files, no event loop manipulation
         try:
             remove_pid_file()
             remove_lock_file()
