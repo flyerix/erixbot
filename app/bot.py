@@ -5120,17 +5120,67 @@ async def run_bot_main_loop():
             try:
                 logger.info("✅ Bot polling started successfully - listening for messages...")
                 
-                # Use run_polling which handles the event loop properly
-                await application.run_polling(
-                    allowed_updates=Update.ALL_TYPES,
-                    drop_pending_updates=True,
-                    timeout=30,
-                    read_timeout=30,
-                    write_timeout=30,
-                    connect_timeout=30,
-                    pool_timeout=30,
-                    stop_signals=None  # Disable signal handlers to avoid threading issues
-                )
+                # Sistema di heartbeat per monitorare la salute del bot
+                last_heartbeat = datetime.now(timezone.utc)
+                heartbeat_interval = 300  # 5 minuti
+                
+                async def heartbeat_monitor():
+                    """Monitora la salute del bot e aggiorna il heartbeat"""
+                    nonlocal last_heartbeat
+                    while True:
+                        try:
+                            await asyncio.sleep(heartbeat_interval)
+                            current_time = datetime.now(timezone.utc)
+                            last_heartbeat = current_time
+                            
+                            # Log heartbeat
+                            logger.info(f"💓 Bot heartbeat - {current_time.strftime('%H:%M:%S')} UTC")
+                            
+                            # Verifica memoria e performance
+                            try:
+                                import psutil
+                                process = psutil.Process()
+                                memory_mb = process.memory_info().rss / 1024 / 1024
+                                
+                                if memory_mb > 400:  # Alert se memoria > 400MB
+                                    logger.warning(f"⚠️ High memory usage: {memory_mb:.1f}MB")
+                                    
+                                    # Forza garbage collection
+                                    import gc
+                                    gc.collect()
+                                    logger.info("🧹 Forced garbage collection")
+                                
+                            except Exception as mem_e:
+                                logger.warning(f"Memory check failed: {mem_e}")
+                            
+                        except asyncio.CancelledError:
+                            logger.info("💓 Heartbeat monitor cancelled")
+                            break
+                        except Exception as hb_e:
+                            logger.error(f"❌ Heartbeat monitor error: {hb_e}")
+                
+                # Avvia il monitor heartbeat in background
+                heartbeat_task = asyncio.create_task(heartbeat_monitor())
+                
+                try:
+                    # Use run_polling which handles the event loop properly
+                    await application.run_polling(
+                        allowed_updates=Update.ALL_TYPES,
+                        drop_pending_updates=True,
+                        timeout=30,
+                        read_timeout=30,
+                        write_timeout=30,
+                        connect_timeout=30,
+                        pool_timeout=30,
+                        stop_signals=None  # Disable signal handlers to avoid threading issues
+                    )
+                finally:
+                    # Cancella il task heartbeat quando il polling termina
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
                 
             except Exception as polling_error:
                 logger.error(f"❌ Polling error: {polling_error}")
@@ -5142,52 +5192,93 @@ async def run_bot_main_loop():
         return
 
 def main():
-    # Simplified startup without signal handlers to avoid threading issues
-    logger.info("🚀 Starting ErixCast bot...")
+    """Main bot function with enhanced stability and auto-restart"""
+    logger.info("🚀 Starting ErixCast bot with enhanced stability...")
     
-    try:
-        import asyncio
-        
-        # Always create a new event loop for maximum compatibility
-        logger.info("🔧 Creating new event loop for bot")
-        
-        # Get or create event loop
+    max_restart_attempts = 10
+    restart_count = 0
+    base_delay = 30  # Base delay between restarts
+    
+    while restart_count < max_restart_attempts:
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError("Event loop is closed")
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the bot
-        logger.info("▶️ Starting bot main loop")
-        asyncio.run(run_bot_main_loop())
-        logger.info("✅ Bot shutdown gracefully")
-    except KeyboardInterrupt:
-        logger.info("🛑 Bot stopped by user")
-        # Run graceful shutdown
-        try:
-            asyncio.run(graceful_shutdown())
-        except Exception as shutdown_error:
-            logger.error(f"Error during graceful shutdown: {shutdown_error}")
-            # Fallback cleanup
+            import asyncio
+            
+            # Always create a new event loop for maximum compatibility
+            logger.info(f"🔧 Creating new event loop for bot (attempt {restart_count + 1})")
+            
+            # Get or create event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    raise RuntimeError("Event loop is closed")
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run the bot with timeout protection
+            logger.info("▶️ Starting bot main loop with stability monitoring")
+            
+            # Create a task with timeout
+            async def run_with_monitoring():
+                try:
+                    await run_bot_main_loop()
+                except Exception as e:
+                    logger.error(f"Bot main loop error: {e}")
+                    raise
+            
+            # Run with asyncio
+            asyncio.run(run_with_monitoring())
+            
+            logger.info("✅ Bot shutdown gracefully")
+            break  # Exit the restart loop if successful shutdown
+            
+        except KeyboardInterrupt:
+            logger.info("🛑 Bot stopped by user")
+            # Run graceful shutdown
+            try:
+                asyncio.run(graceful_shutdown())
+            except Exception as shutdown_error:
+                logger.error(f"Error during graceful shutdown: {shutdown_error}")
+            break  # Exit restart loop on user interrupt
+            
+        except Exception as e:
+            restart_count += 1
+            logger.error(f"💥 Bot crashed (attempt {restart_count}/{max_restart_attempts}): {e}")
+            
+            if restart_count >= max_restart_attempts:
+                logger.critical(f"❌ Max restart attempts reached ({max_restart_attempts})")
+                logger.critical("Bot will rely on external restart mechanism")
+                break
+            
+            # Calculate exponential backoff delay
+            delay = min(base_delay * (2 ** (restart_count - 1)), 300)  # Max 5 minutes
+            logger.info(f"🔄 Restarting bot in {delay} seconds... (attempt {restart_count + 1})")
+            
+            # Cleanup before restart
             try:
                 remove_pid_file()
                 remove_lock_file()
             except:
                 pass
-    except Exception as e:
-        logger.critical(f"💥 Bot crashed: {e}")
-        # Don't re-raise to avoid restart loops
-        logger.critical("Bot will restart via Render's restart policy")
-    finally:
-        # Cleanup
-        try:
-            remove_pid_file()
-            remove_lock_file()
-        except:
-            pass
+            
+            # Wait before restart
+            import time
+            time.sleep(delay)
+            
+            logger.info(f"🔄 Attempting bot restart #{restart_count + 1}")
+    
+    # Final cleanup
+    try:
+        remove_pid_file()
+        remove_lock_file()
+    except:
+        pass
+    
+    if restart_count >= max_restart_attempts:
+        logger.critical("💥 Bot failed to start after multiple attempts")
+        sys.exit(1)
+    else:
+        logger.info("✅ Bot main function completed")
 
 if __name__ == '__main__':
     main()

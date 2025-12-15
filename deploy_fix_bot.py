@@ -58,12 +58,14 @@ def commit_and_push_changes():
         return False
     
     # Commit with descriptive message
-    commit_msg = f"🔧 Fix bot errors - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n" \
-                f"- Fix timezone mismatch in health check\n" \
-                f"- Fix coroutine warning in BackgroundTaskManager\n" \
-                f"- Fix database connection test for SQLite\n" \
-                f"- Fix timezone calculation in user stats\n" \
-                f"- Improve error handling and logging"
+    commit_msg = f"🔧 Fix bot stability - 24/7 uptime solution - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n" \
+                f"- Implement bot watchdog for 24/7 monitoring\n" \
+                f"- Add heartbeat system to main bot loop\n" \
+                f"- Enhanced auto-restart with exponential backoff\n" \
+                f"- Memory monitoring and garbage collection\n" \
+                f"- Robust error handling and recovery\n" \
+                f"- Admin alerts for critical failures\n" \
+                f"- Prevent bot from stopping after few hours"
     
     success, _ = run_command(f'git commit -m "{commit_msg}"')
     if not success:
@@ -157,7 +159,7 @@ def verify_fixes():
 
 def main():
     """Funzione principale del deploy automatico"""
-    logger.info("🚀 Avvio deploy automatico per correggere il bot...")
+    logger.info("🚀 Avvio deploy automatico per correggere la stabilità del bot...")
     logger.info("=" * 60)
     
     # Step 1: Controlla se ci sono modifiche da committare
@@ -182,7 +184,10 @@ def main():
     # Step 5: Verifica che le correzioni funzionino
     if verify_fixes():
         logger.info("🎉 Deploy completato con successo!")
-        logger.info("✅ Tutte le correzioni sono state applicate!")
+        logger.info("✅ Tutte le correzioni per la stabilità sono state applicate!")
+        logger.info("🐕 Watchdog attivo per monitoraggio 24/7")
+        logger.info("💓 Sistema heartbeat integrato")
+        logger.info("🔄 Auto-restart implementato")
     else:
         logger.warning("⚠️ Deploy completato ma potrebbero esserci ancora problemi")
     

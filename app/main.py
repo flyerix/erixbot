@@ -623,9 +623,33 @@ def run_bot():
 if __name__ != '__main__':
     # This block runs when imported by Gunicorn
     import threading
+    
+    # Avvia il bot in un thread separato
     bot_thread = threading.Thread(target=run_bot, daemon=True)
     bot_thread.start()
     logger.info("ErixCastBot started successfully in production mode")
+    
+    # Avvia il watchdog per monitorare la stabilità del bot
+    def start_watchdog():
+        """Avvia il watchdog per monitorare il bot"""
+        try:
+            # Aspetta che il bot si avvii
+            import time
+            time.sleep(120)  # Aspetta 2 minuti
+            
+            # Importa e avvia il watchdog
+            from bot_watchdog import BotWatchdog
+            watchdog = BotWatchdog()
+            logger.info("🐕 Starting bot watchdog...")
+            watchdog.run_monitoring()
+            
+        except Exception as e:
+            logger.error(f"❌ Watchdog failed to start: {e}")
+    
+    # Avvia il watchdog in un thread separato
+    watchdog_thread = threading.Thread(target=start_watchdog, daemon=True)
+    watchdog_thread.start()
+    logger.info("🐕 Bot watchdog thread started")
 
     # Start enhanced auto-ping system to prevent Render sleep
     if app is not None:
