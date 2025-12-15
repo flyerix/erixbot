@@ -281,9 +281,9 @@ class CircuitBreaker:
 # Istanza globale del circuit breaker
 circuit_breaker = CircuitBreaker()
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
-    logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
+async def graceful_shutdown():
+    """Handle shutdown gracefully without signal handlers"""
+    logger.info("🛑 Initiating graceful shutdown...")
 
     try:
         # Stop scheduler gracefully
@@ -315,7 +315,6 @@ def signal_handler(signum, frame):
         logger.error(f"Error cleaning up files: {e}")
 
     logger.info("✅ Graceful shutdown completed")
-    sys.exit(0)
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -3850,7 +3849,7 @@ async def run_bot_main_loop():
                 logger.critical("Application stop initiated...")
 
                 # Trigger graceful shutdown
-                signal_handler(signal.SIGTERM, None)
+                await graceful_shutdown()
 
             except Exception as shutdown_error:
                 logger.critical(f"Error during shutdown: {shutdown_error}")
@@ -4226,6 +4225,10 @@ async def run_bot_main_loop():
             logger.error(f"❌ Bot connection failed: {bot_e}")
             raise
 
+        # Initialize the application first
+        await application.initialize()
+        await application.start()
+
         # Choose between webhook and polling based on configuration
         if USE_WEBHOOK and WEBHOOK_URL and TELEGRAM_BOT_TOKEN:
             # Use webhook for better efficiency (no polling = less resources)
@@ -4242,27 +4245,41 @@ async def run_bot_main_loop():
 
                 # Keep the application alive (Flask will handle requests)
                 # This is just to keep the event loop running
-                while True:
-                    await asyncio.sleep(60)  # Check every minute
-        
-                    # Monitor resources every 5 minutes
-                    if int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 300 == 0:
-                        if resource_monitor.check_memory_usage():
-                            logger.warning("🔄 Memory threshold exceeded - triggering restart")
-                            # Exit to trigger Render restart
-                            return
-        
-                    logger.debug("Webhook mode active - bot ready")
+                try:
+                    while True:
+                        await asyncio.sleep(60)  # Check every minute
+            
+                        # Monitor resources every 5 minutes
+                        if int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 300 == 0:
+                            if resource_monitor.check_memory_usage():
+                                logger.warning("🔄 Memory threshold exceeded - triggering restart")
+                                # Exit to trigger Render restart
+                                return
+            
+                        logger.debug("Webhook mode active - bot ready")
+                finally:
+                    # Cleanup webhook mode
+                    await application.stop()
+                    await application.shutdown()
 
             except Exception as webhook_e:
                 logger.error(f"❌ Failed to set webhook: {webhook_e}")
                 logger.info("🔄 Falling back to polling mode...")
                 USE_WEBHOOK = False
+                # Stop the application to restart in polling mode
+                await application.stop()
+                await application.shutdown()
+                # Reinitialize for polling
+                await application.initialize()
+                await application.start()
 
         if not USE_WEBHOOK:
             # Use polling (fallback or default)
             logger.info("🔄 Starting polling mode")
-            application.run_polling(
+            
+            # Start polling with proper async handling
+            updater = application.updater
+            await updater.start_polling(
                 allowed_updates=Update.ALL_TYPES,
                 drop_pending_updates=True,
                 timeout=30,
@@ -4271,6 +4288,16 @@ async def run_bot_main_loop():
                 connect_timeout=30,
                 pool_timeout=30
             )
+            
+            # Keep the bot running
+            try:
+                # Run until stopped
+                await updater.idle()
+            finally:
+                # Cleanup
+                await updater.stop()
+                await application.stop()
+                await application.shutdown()
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
@@ -4303,7 +4330,19 @@ def main():
         logger.info("✅ Bot shutdown gracefully")
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
-        signal_handler(signal.SIGINT, None)
+        # Run graceful shutdown in the event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                loop.run_until_complete(graceful_shutdown())
+        except Exception as shutdown_error:
+            logger.error(f"Error during graceful shutdown: {shutdown_error}")
+            # Fallback cleanup
+            try:
+                remove_pid_file()
+                remove_lock_file()
+            except:
+                pass
     except Exception as e:
         logger.critical(f"💥 Bot crashed: {e}")
         raise
