@@ -4291,8 +4291,8 @@ async def run_bot_main_loop():
             
             # Keep the bot running
             try:
-                # Run until stopped
-                await updater.idle()
+                # Run until stopped - use application.idle() not updater.idle()
+                await application.idle()
             finally:
                 # Cleanup
                 await updater.stop()
