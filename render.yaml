@@ -11,12 +11,15 @@ services:
     # Enhanced configuration for 24/7 availability
     maxShutdownDelaySeconds: 60
     healthCheckTimeout: 30
+    # PERSISTENT DISK per database SQLite autonomo
+    disk:
+      name: erixcast-persistent-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1  # 1GB gratuito per database e backup
     # Environment variables for production deployment
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         fromSecret: telegram_bot_token
-      - key: DATABASE_URL
-        fromSecret: database_url
       - key: OPENAI_API_KEY
         fromSecret: openai_api_key
       - key: ADMIN_IDS
@@ -40,11 +43,8 @@ services:
       # Abilita webhook per efficienza massima (no polling)
       - key: USE_WEBHOOK
         value: true
-      # SSL configuration for PostgreSQL (flexible for stability)
-      - key: PGSSLMODE
-        value: allow
-      - key: RENDER
+      # SQLite autonomo - nessuna configurazione SSL necessaria
+      - key: AUTONOMOUS_MODE
         value: true
-      # Render-specific optimizations
-      - key: PGCONNECT_TIMEOUT
-        value: 30
+      - key: SQLITE_PERSISTENT
+        value: true
