@@ -71,7 +71,6 @@ from services.memory_manager import memory_manager
 from locales import localization
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import signal
 import sys
 import asyncio
 from collections import defaultdict
@@ -4279,39 +4278,28 @@ async def run_bot_main_loop():
         return
 
 def main():
-    # Set up signal handlers for graceful shutdown (only in main thread)
-    try:
-        import threading
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
-            logger.info("✅ Signal handlers set up for graceful shutdown")
-        else:
-            logger.info("ℹ️ Running in thread - signal handlers disabled")
-    except (ValueError, OSError) as e:
-        logger.warning(f"Signal handling not available: {e} - graceful shutdown disabled")
-
-    # Simple startup - remove complex circuit breaker and lock file logic that might cause issues
-    logger.info("Starting bot...")
-
+    # Simplified startup without signal handlers to avoid threading issues
+    logger.info("🚀 Starting ErixCast bot...")
+    
     try:
         import asyncio
         import threading
         
-        # Check if we're in the main thread
-        if threading.current_thread() is threading.main_thread():
-            # Main thread - use asyncio.run()
-            logger.info("🚀 Starting bot in main thread")
-            asyncio.run(run_bot_main_loop())
-        else:
-            # Secondary thread - create new event loop
-            logger.info("🚀 Starting bot in secondary thread")
+        # Always create a new event loop for maximum compatibility
+        logger.info("🔧 Creating new event loop for bot")
+        
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop is closed")
+        except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(run_bot_main_loop())
-            finally:
-                loop.close()
+        
+        # Run the bot
+        logger.info("▶️ Starting bot main loop")
+        loop.run_until_complete(run_bot_main_loop())
         logger.info("✅ Bot shutdown gracefully")
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
