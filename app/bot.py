@@ -1699,6 +1699,155 @@ Inserisci eventuali note o informazioni extra:
         context.user_data.pop('create_list_cost', None)
         context.user_data.pop('create_list_expiry', None)
 
+    elif action == 'open_ticket_verified':
+        # User has completed troubleshooting and can now create ticket
+        if not context.user_data.get('troubleshooting_completed'):
+            await update.message.reply_text("❌ Devi completare prima la verifica preliminare. Torna al menu ticket.")
+            return
+            
+        context.user_data['ticket_title'] = message_text
+        context.user_data['action'] = 'ticket_description_verified'
+        user_lang = get_user_language(user_id)
+        
+        description_message = f"""
+📝 **Descrizione Dettagliata del Problema**
+
+Hai inserito il titolo: **{message_text}**
+
+Ora descrivi il problema in dettaglio:
+
+💡 **Includi queste informazioni:**
+• Quando si verifica il problema?
+• Cosa stavi facendo quando è successo?
+• Messaggi di errore specifici (se presenti)
+• Su quale dispositivo (Firestick, TV, telefono, ecc.)
+• Da quanto tempo si verifica?
+
+📋 **Esempio di descrizione completa:**
+"Il problema si verifica ogni sera verso le 20:00. Quando provo a guardare Netflix, l'app si blocca dopo 2-3 minuti. Appare il messaggio 'Errore di connessione'. Uso un Firestick 4K collegato alla TV Samsung. Il problema è iniziato 3 giorni fa."
+
+✍️ **Scrivi la descrizione dettagliata:**
+"""
+        await update.message.reply_text(description_message)
+
+    elif action == 'ticket_description_verified':
+        # Create ticket without AI - direct to admin
+        title = context.user_data.get('ticket_title')
+        session = SessionLocal()
+        ticket = None
+        try:
+            user_lang = get_user_language(user_id)
+            if not title or not message_text:
+                await update.message.reply_text("❌ Titolo o descrizione mancanti. Riprova.")
+                return
+
+            # Sanitize input
+            title = sanitize_text(title, 200)
+            description = sanitize_text(message_text, 2000)
+
+            if not title or not description:
+                await update.message.reply_text("❌ Input non valido. Riprova con testo normale.")
+                return
+
+            # Create ticket directly escalated to admin (no AI)
+            ticket = Ticket(
+                user_id=user_id,
+                title=title,
+                description=description,
+                status='escalated',  # Direct to admin
+                ai_attempts=0,  # No AI attempts
+                auto_escalated=True  # Mark as escalated
+            )
+            session.add(ticket)
+            session.commit()
+
+            # Add user message
+            ticket_message = TicketMessage(ticket_id=ticket.id, user_id=user_id, message=description)
+            session.add(ticket_message)
+            session.commit()
+
+            # Notify user - ticket created and sent to admin
+            success_message = f"""
+✅ **Ticket Creato con Successo!**
+
+🎫 **Ticket ID:** #{ticket.id}
+📝 **Titolo:** {title}
+📋 **Stato:** Inviato agli admin
+👨‍💼 **Gestione:** Admin umano (no AI)
+
+📬 **Cosa succede ora:**
+• Gli admin hanno ricevuto la tua richiesta
+• Riceverai una risposta personalizzata entro 24 ore
+• Puoi controllare lo stato dal menu "I Miei Ticket"
+• Gli admin ti contatteranno direttamente qui
+
+⏳ **Tempo di risposta stimato:** 2-24 ore
+
+Grazie per aver completato la verifica preliminare!
+"""
+            
+            keyboard = [
+                [InlineKeyboardButton("📋 I Miei Ticket", callback_data='my_tickets')],
+                [InlineKeyboardButton("🏠 Menu Principale", callback_data='back_to_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(success_message, reply_markup=reply_markup)
+
+            # Notify admins immediately
+            admin_message = f"""
+🎫 **Nuovo Ticket Diretto Admin**
+
+🆔 **ID:** #{ticket.id}
+👤 **User:** {user_id}
+📝 **Titolo:** {title}
+📄 **Descrizione:** {description}
+📅 **Data:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+✅ **Troubleshooting Completato:** Utente ha verificato:
+• Connessione internet ✅
+• Velocità rete ✅  
+• Riavvio dispositivi ✅
+• Verifica app ✅
+
+🎯 **Azione:** Risposta diretta admin richiesta (no AI)
+"""
+            
+            admin_notifications_sent = 0
+            for admin_id in ADMIN_IDS:
+                try:
+                    admin_keyboard = [
+                        [InlineKeyboardButton("🔍 Visualizza Ticket", callback_data=f'admin_view_ticket:{ticket.id}')],
+                        [InlineKeyboardButton("💬 Rispondi", callback_data=f'admin_reply_ticket:{ticket.id}')],
+                        [InlineKeyboardButton("⚙️ Pannello Admin", callback_data='admin_panel')]
+                    ]
+                    admin_reply_markup = InlineKeyboardMarkup(admin_keyboard)
+                    
+                    await send_safe_message(admin_id, admin_message, reply_markup=admin_reply_markup)
+                    admin_notifications_sent += 1
+                    logger.info(f"✅ Direct admin ticket notification sent to admin {admin_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to notify admin {admin_id}: {str(e)}")
+
+            # Log ticket creation
+            log_ticket_event(ticket.id, "created_direct_admin", user_id, f"Troubleshooting completed. Admins notified: {admin_notifications_sent}/{len(ADMIN_IDS)}")
+
+        except Exception as e:
+            logger.error(f"❌ Error creating verified ticket for user {user_id}: {str(e)}")
+            if ticket:
+                try:
+                    session.rollback()
+                except:
+                    pass
+            await update.message.reply_text("❌ Errore durante la creazione del ticket. Riprova più tardi.")
+        finally:
+            session.close()
+            
+        # Clear user data
+        context.user_data.pop('action', None)
+        context.user_data.pop('ticket_title', None)
+        context.user_data.pop('troubleshooting_completed', None)
+
     elif action == 'delete_list_reason':
         if len(message_text.strip()) < 5:
             await update.message.reply_text("❌ Il motivo deve essere di almeno 5 caratteri. Sii più specifico:")
@@ -2367,8 +2516,159 @@ async def open_ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     user_lang = get_user_language(query.from_user.id)
-    await query.edit_message_text(localization.get_text('ticket.enter_title', user_lang))
-    context.user_data['action'] = 'open_ticket'
+    
+    # Start preliminary troubleshooting checklist
+    troubleshooting_message = f"""
+🔧 **Verifica Preliminare - Risoluzione Problemi**
+
+Prima di aprire un ticket, aiutaci a risolvere il problema seguendo questi passaggi:
+
+📡 **Step 1: Verifica Connessione Internet**
+• Hai controllato se internet funziona su altri dispositivi?
+• La connessione è stabile (no interruzioni)?
+
+💪 **Step 2: Test Velocità Rete**
+• Hai testato la velocità della tua connessione?
+• La velocità è sufficiente per lo streaming (min 5 Mbps)?
+
+🔌 **Step 3: Riavvio Dispositivi**
+• Hai spento e riacceso il Firestick/dispositivo?
+• Hai riavviato il modem/router?
+• Hai aspettato almeno 30 secondi prima di riaccendere?
+
+📱 **Step 4: Verifica App**
+• Hai chiuso e riaperto l'app?
+• Hai verificato se ci sono aggiornamenti disponibili?
+
+❓ **Hai già provato tutti questi passaggi?**
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Sì, ho provato tutto", callback_data='troubleshooting_completed')],
+        [InlineKeyboardButton("❌ No, provo ora", callback_data='troubleshooting_guide')],
+        [InlineKeyboardButton("⬅️ Indietro", callback_data='ticket_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(troubleshooting_message, reply_markup=reply_markup)
+
+async def troubleshooting_guide_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_lang = get_user_language(query.from_user.id)
+    
+    guide_message = f"""
+🛠️ **Guida Risoluzione Problemi Dettagliata**
+
+📡 **1. Verifica Connessione Internet:**
+• Apri un browser e vai su google.com
+• Prova a guardare un video su YouTube
+• Se non funziona, contatta il tuo provider internet
+
+💪 **2. Test Velocità Rete:**
+• Vai su speedtest.net dal tuo telefono/PC
+• Esegui il test di velocità
+• Velocità minima richiesta: 5 Mbps download
+
+🔌 **3. Riavvio Dispositivi (IMPORTANTE):**
+• **Firestick/Dispositivo:**
+  - Tieni premuto il pulsante power per 10 secondi
+  - Aspetta 30 secondi
+  - Riaccendi il dispositivo
+
+• **Modem/Router:**
+  - Scollega il cavo di alimentazione
+  - Aspetta 30 secondi
+  - Ricollega e aspetta 2-3 minuti
+
+📱 **4. Verifica App:**
+• Chiudi completamente l'app (non solo minimizzare)
+• Riapri l'app
+• Controlla aggiornamenti nel Play Store/App Store
+
+⏱️ **Tempo necessario:** 5-10 minuti
+
+Dopo aver completato tutti i passaggi, torna qui e clicca "Ho completato i passaggi".
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Ho completato i passaggi", callback_data='troubleshooting_completed')],
+        [InlineKeyboardButton("🔄 Mostra di nuovo la checklist", callback_data='open_ticket')],
+        [InlineKeyboardButton("⬅️ Indietro", callback_data='ticket_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(guide_message, reply_markup=reply_markup)
+
+async def troubleshooting_completed_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_lang = get_user_language(query.from_user.id)
+    
+    # Final verification before allowing ticket creation
+    final_check_message = f"""
+✅ **Verifica Finale Completata**
+
+Perfetto! Hai completato tutti i passaggi di risoluzione problemi.
+
+🔍 **Verifica Finale:**
+• ✅ Connessione internet verificata
+• ✅ Velocità rete testata  
+• ✅ Dispositivi riavviati
+• ✅ App verificata e aggiornata
+
+❓ **Il problema persiste ancora?**
+
+Se il problema è stato risolto, puoi tornare al menu principale.
+Se il problema persiste, ora puoi aprire un ticket per ricevere assistenza diretta da un admin.
+
+⚠️ **Nota:** I ticket vengono gestiti direttamente dagli admin umani, non dall'AI.
+Riceverai una risposta personalizzata entro 24 ore.
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("🎫 Apri Ticket (problema persiste)", callback_data='create_ticket_verified')],
+        [InlineKeyboardButton("✅ Problema risolto", callback_data='back_to_main')],
+        [InlineKeyboardButton("🔄 Riprova troubleshooting", callback_data='troubleshooting_guide')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(final_check_message, reply_markup=reply_markup)
+
+async def create_ticket_verified_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_lang = get_user_language(query.from_user.id)
+    
+    # Now allow ticket creation after verification
+    ticket_creation_message = f"""
+🎫 **Creazione Ticket Assistenza**
+
+Hai completato tutti i passaggi di troubleshooting e il problema persiste.
+Ora puoi creare un ticket per ricevere assistenza diretta da un admin.
+
+📝 **Informazioni Ticket:**
+• Risposta diretta da admin umano (no AI)
+• Tempo di risposta: entro 24 ore
+• Supporto personalizzato per il tuo problema
+
+✍️ **Inserisci il titolo del problema:**
+
+💡 **Esempi di titoli chiari:**
+• "App si blocca durante la riproduzione"
+• "Errore di connessione al server"
+• "Video non si carica"
+• "Problema con la qualità video"
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("❌ Annulla", callback_data='ticket_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(ticket_creation_message, reply_markup=reply_markup)
+    context.user_data['action'] = 'open_ticket_verified'
+    context.user_data['troubleshooting_completed'] = True
 
 async def my_tickets_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -4599,6 +4899,9 @@ async def run_bot_main_loop():
 
     # Register exact match handlers (medium priority) - specific menu buttons
     application.add_handler(CallbackQueryHandler(open_ticket_callback, pattern='^open_ticket$'))
+    application.add_handler(CallbackQueryHandler(troubleshooting_guide_callback, pattern='^troubleshooting_guide$'))
+    application.add_handler(CallbackQueryHandler(troubleshooting_completed_callback, pattern='^troubleshooting_completed$'))
+    application.add_handler(CallbackQueryHandler(create_ticket_verified_callback, pattern='^create_ticket_verified$'))
     application.add_handler(CallbackQueryHandler(my_tickets_callback, pattern='^my_tickets$'))
     application.add_handler(CallbackQueryHandler(admin_lists_callback, pattern='^admin_lists$'))
     application.add_handler(CallbackQueryHandler(create_list_callback, pattern='^create_list$'))
