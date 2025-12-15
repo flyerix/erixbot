@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 import pytz
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, DeletionRequest, UserActivity, AuditLog
 
 def get_database_session():
     """Helper function to get database session with availability check"""
@@ -1082,6 +1082,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton(localization.get_text('admin.lists_management', user_lang), callback_data='admin_lists')],
             [InlineKeyboardButton(localization.get_text('admin.tickets_management', user_lang), callback_data='admin_tickets')],
             [InlineKeyboardButton(localization.get_text('admin.renewals_management', user_lang), callback_data='admin_renewals')],
+            [InlineKeyboardButton("🗑️ Richieste Eliminazione", callback_data='admin_deletion_requests')],
             [InlineKeyboardButton(localization.get_text('admin.analytics', user_lang), callback_data='admin_analytics')],
             [InlineKeyboardButton(localization.get_text('admin.performance', user_lang), callback_data='admin_performance')],
             [InlineKeyboardButton(localization.get_text('admin.revenue', user_lang), callback_data='admin_revenue')],
@@ -1278,6 +1279,41 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Full traceback:", exc_info=True)
             try:
                 await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle richieste di rinnovo. Riprova più tardi.")
+            except Exception as inner_e:
+                logger.error(f"Failed to send error message to admin {user_id}: {str(inner_e)}")
+        finally:
+            try:
+                session.close()
+            except:
+                pass
+
+    elif data == 'admin_deletion_requests':
+        logger.info(f"Admin {user_id} accessed deletion requests")
+        try:
+            session = SessionLocal()
+            deletion_requests = session.query(DeletionRequest).filter(DeletionRequest.status == 'pending').all()
+            logger.info(f"Found {len(deletion_requests)} deletion requests")
+
+            if not deletion_requests:
+                keyboard = [[InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text("🗑️ **Richieste Eliminazione**\n\nNessuna richiesta di eliminazione in attesa.", reply_markup=reply_markup)
+                return
+
+            deletion_text = "🗑️ **Richieste Eliminazione Pendenti:**\n\n"
+            keyboard = []
+            for request in deletion_requests:
+                deletion_text += f"📋 **{request.list_name}**\n👤 User: {request.user_id}\n📝 Motivo: {request.reason[:50]}{'...' if len(request.reason) > 50 else ''}\n📅 {request.created_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+                keyboard.append([InlineKeyboardButton(f"🔍 Gestisci {request.list_name}", callback_data=f'manage_deletion:{request.id}')])
+
+            keyboard.append([InlineKeyboardButton("⬅️ Indietro", callback_data='admin_panel')])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(deletion_text, reply_markup=reply_markup)
+            logger.info(f"Successfully displayed {len(deletion_requests)} deletion requests to admin {user_id}")
+        except Exception as e:
+            logger.error(f"Error in admin_deletion_requests for admin {user_id}: {str(e)}")
+            try:
+                await query.edit_message_text("❌ Si è verificato un errore nel caricamento delle richieste di eliminazione. Riprova più tardi.")
             except Exception as inner_e:
                 logger.error(f"Failed to send error message to admin {user_id}: {str(inner_e)}")
         finally:
@@ -1522,31 +1558,101 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('ticket_title', None)
 
     elif action == 'create_list_name':
-        context.user_data['create_list_name'] = message_text
+        # Validate list name
+        if len(message_text.strip()) < 2:
+            await update.message.reply_text("❌ Il nome deve essere di almeno 2 caratteri. Riprova:")
+            return
+        
+        context.user_data['create_list_name'] = message_text.strip()
         context.user_data['action'] = 'create_list_cost'
-        user_lang = get_user_language(user_id)
-        await update.message.reply_text(localization.get_text('list.enter_cost', user_lang))
+        
+        cost_message = f"""
+✅ **Nome Lista:** {message_text.strip()}
+
+💰 **Step 2/4: Costo Rinnovo**
+
+Inserisci il prezzo di rinnovo:
+• Esempi validi: €9.99, $12.50, £8.00
+• Usa simbolo valuta + numero
+• Formato: simbolo + cifra (es: €15.99)
+
+💡 **Suggerimenti:**
+• Netflix: €12.99
+• Spotify: €9.99  
+• Disney+: €8.99
+
+📝 **Inserisci il costo:**
+"""
+        await update.message.reply_text(cost_message)
 
     elif action == 'create_list_cost':
-        context.user_data['create_list_cost'] = message_text
+        # Validate cost format
+        if not any(char in message_text for char in ['€', '$', '£', '¥']) or len(message_text.strip()) < 2:
+            await update.message.reply_text("❌ Formato costo non valido. Usa simbolo + numero (es: €9.99). Riprova:")
+            return
+            
+        context.user_data['create_list_cost'] = message_text.strip()
         context.user_data['action'] = 'create_list_expiry'
-        user_lang = get_user_language(user_id)
-        await update.message.reply_text(localization.get_text('list.enter_expiry', user_lang))
+        
+        expiry_message = f"""
+✅ **Nome Lista:** {context.user_data['create_list_name']}
+✅ **Costo:** {message_text.strip()}
+
+📅 **Step 3/4: Data Scadenza**
+
+Inserisci la data di scadenza:
+• Formato: GG/MM/AAAA
+• Esempio: 31/12/2024
+
+💡 **Suggerimenti:**
+• Per abbonamenti mensili: data del prossimo mese
+• Per abbonamenti annuali: data del prossimo anno
+• Controlla sempre la data esatta nel servizio
+
+📝 **Inserisci la data (GG/MM/AAAA):**
+"""
+        await update.message.reply_text(expiry_message)
 
     elif action == 'create_list_expiry':
         try:
             expiry_date = datetime.strptime(message_text, "%d/%m/%Y").replace(tzinfo=timezone.utc)
+            
+            # Check if date is in the future
+            if expiry_date <= datetime.now(timezone.utc):
+                await update.message.reply_text("❌ La data deve essere futura. Inserisci una data valida (GG/MM/AAAA):")
+                return
+                
             context.user_data['create_list_expiry'] = expiry_date
             context.user_data['action'] = 'create_list_notes'
-            user_lang = get_user_language(user_id)
-            await update.message.reply_text(localization.get_text('list.enter_notes', user_lang))
+            
+            notes_message = f"""
+✅ **Nome Lista:** {context.user_data['create_list_name']}
+✅ **Costo:** {context.user_data['create_list_cost']}
+✅ **Scadenza:** {expiry_date.strftime('%d/%m/%Y')}
+
+📝 **Step 4/4: Note Aggiuntive**
+
+Inserisci eventuali note o informazioni extra:
+• Dettagli account (es: "Account famiglia")
+• Istruzioni speciali
+• Informazioni di contatto
+• Scrivi "nessuna" se non hai note
+
+💡 **Esempi:**
+• "Account condiviso con 4 persone"
+• "Rinnovo automatico attivo"
+• "Contattare prima della scadenza"
+
+📝 **Inserisci le note (o "nessuna"):**
+"""
+            await update.message.reply_text(notes_message)
         except ValueError:
-            await update.message.reply_text("❌ Formato data non valido. Usa DD/MM/YYYY (es: 31/12/2024)")
+            await update.message.reply_text("❌ Formato data non valido. Usa GG/MM/AAAA (es: 31/12/2024). Riprova:")
 
     elif action == 'create_list_notes':
         session = SessionLocal()
         try:
-            notes = message_text if message_text.lower() != 'nessuna' else None
+            notes = message_text.strip() if message_text.lower().strip() != 'nessuna' else None
             new_list = List(
                 name=context.user_data['create_list_name'],
                 cost=context.user_data['create_list_cost'],
@@ -1555,14 +1661,73 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             session.add(new_list)
             session.commit()
-            user_lang = get_user_language(user_id)
-            await update.message.reply_text(localization.get_text('list.created', user_lang, name=new_list.name))
+            
+            # Create success message with summary
+            success_message = f"""
+🎉 **Lista Creata con Successo!**
+
+📋 **Riepilogo:**
+• **Nome:** {new_list.name}
+• **Costo:** {new_list.cost}
+• **Scadenza:** {new_list.expiry_date.strftime('%d/%m/%Y')}
+• **Note:** {notes if notes else 'Nessuna'}
+
+✅ La lista è ora disponibile per tutti gli utenti!
+
+🔄 **Prossimi passi:**
+• Gli utenti possono cercarla e richiedere il rinnovo
+• Riceverai notifiche per le richieste di rinnovo
+• Puoi modificarla dal pannello admin quando vuoi
+"""
+            
+            keyboard = [
+                [InlineKeyboardButton("📋 Gestisci Liste", callback_data='admin_lists')],
+                [InlineKeyboardButton("🏠 Menu Principale", callback_data='back_to_main')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(success_message, reply_markup=reply_markup)
+            
+        except Exception as e:
+            await update.message.reply_text(f"❌ Errore durante la creazione: {str(e)}")
         finally:
             session.close()
+            
+        # Clear user data
         context.user_data.pop('action', None)
         context.user_data.pop('create_list_name', None)
         context.user_data.pop('create_list_cost', None)
         context.user_data.pop('create_list_expiry', None)
+
+    elif action == 'delete_list_reason':
+        if len(message_text.strip()) < 5:
+            await update.message.reply_text("❌ Il motivo deve essere di almeno 5 caratteri. Sii più specifico:")
+            return
+            
+        context.user_data['delete_reason'] = message_text.strip()
+        list_name = context.user_data.get('delete_list_name')
+        
+        confirm_message = f"""
+🗑️ **Conferma Richiesta Eliminazione**
+
+📋 **Lista:** {list_name}
+📝 **Motivo:** {message_text.strip()}
+
+⚠️ **Attenzione:**
+• Questa richiesta sarà inviata agli admin
+• Non potrai annullarla una volta inviata
+• Gli admin valuteranno il motivo fornito
+
+✅ **Confermi l'invio della richiesta?**
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Sì, invia richiesta", callback_data=f'confirm_delete:{list_name}')],
+            [InlineKeyboardButton("❌ No, annulla", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(confirm_message, reply_markup=reply_markup)
 
     elif action == 'quick_renew':
         session = SessionLocal()
@@ -2047,21 +2212,112 @@ async def delete_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     list_name = query.data.split(':', 1)[1]
+    user_id = query.from_user.id
+    
+    context.user_data['delete_list_name'] = list_name
 
+    delete_message = f"""
+🗑️ **Richiesta Eliminazione Lista**
+
+📋 **Lista:** {list_name}
+
+⚠️ **IMPORTANTE:**
+• Questa è una richiesta che deve essere approvata da un admin
+• Non puoi eliminare direttamente le liste
+• Gli admin valuteranno la tua richiesta
+
+📝 **Motivo della richiesta:**
+Per favore, spiega brevemente perché vuoi eliminare questa lista:
+
+💡 **Esempi:**
+• "Non uso più questo servizio"
+• "Ho cambiato abbonamento"
+• "Lista duplicata"
+• "Servizio non più disponibile"
+
+✍️ **Scrivi il motivo:**
+"""
+    
     keyboard = [
-        [InlineKeyboardButton("✅ Sì, elimina", callback_data=f'confirm_delete:{list_name}')],
-        [InlineKeyboardButton("❌ No, annulla", callback_data='back_to_main')]
+        [InlineKeyboardButton("❌ Annulla", callback_data='back_to_main')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.edit_message_text(f"🗑️ Sei sicuro di voler eliminare la lista **{list_name}**?\n\n⚠️ Questa azione non può essere annullata!", reply_markup=reply_markup)
+    
+    await query.edit_message_text(delete_message, reply_markup=reply_markup)
+    context.user_data['action'] = 'delete_list_reason'
 
 async def confirm_delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     list_name = query.data.split(':', 1)[1]
+    user_id = query.from_user.id
 
-    # Here we would send delete request to admin - for now just confirm
-    await query.edit_message_text(f"✅ Richiesta di eliminazione inviata!\n\n📋 Lista: {list_name}\n\nGli admin riceveranno la notifica per l'approvazione. 🗑️")
+    session = SessionLocal()
+    try:
+        # Create deletion request
+        deletion_request = DeletionRequest(
+            user_id=user_id,
+            list_name=list_name,
+            reason=context.user_data.get('delete_reason', 'Nessun motivo specificato'),
+            status='pending'
+        )
+        session.add(deletion_request)
+        session.commit()
+        
+        # Notify admins
+        admin_message = f"""
+🗑️ **Nuova Richiesta Eliminazione Lista**
+
+👤 **Utente:** {user_id}
+📋 **Lista:** {list_name}
+📝 **Motivo:** {deletion_request.reason}
+📅 **Data:** {deletion_request.created_at.strftime('%d/%m/%Y %H:%M')}
+
+⚡ **Azione Richiesta:** Gestisci dal pannello admin
+"""
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                admin_keyboard = [
+                    [InlineKeyboardButton("🔍 Gestisci Richieste", callback_data='admin_deletion_requests')],
+                    [InlineKeyboardButton("⚙️ Pannello Admin", callback_data='admin_panel')]
+                ]
+                admin_reply_markup = InlineKeyboardMarkup(admin_keyboard)
+                await send_safe_message(admin_id, admin_message, reply_markup=admin_reply_markup)
+            except Exception as e:
+                logger.error(f"Failed to notify admin {admin_id}: {e}")
+        
+        success_message = f"""
+✅ **Richiesta Inviata con Successo!**
+
+📋 **Lista:** {list_name}
+📝 **Motivo:** {deletion_request.reason}
+🆔 **ID Richiesta:** #{deletion_request.id}
+
+📬 **Cosa succede ora:**
+• Gli admin hanno ricevuto la notifica
+• Valuteranno la tua richiesta
+• Riceverai una risposta entro 24-48 ore
+• Puoi controllare lo stato dal menu principale
+
+⏳ **Stato:** In attesa di approvazione
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("🏠 Menu Principale", callback_data='back_to_main')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(success_message, reply_markup=reply_markup)
+        
+    except Exception as e:
+        await query.edit_message_text(f"❌ Errore durante l'invio della richiesta: {str(e)}")
+    finally:
+        session.close()
+        # Clear user data
+        context.user_data.pop('delete_list_name', None)
+        context.user_data.pop('delete_reason', None)
+        context.user_data.pop('action', None)
 
 async def notify_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2613,7 +2869,43 @@ async def create_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.edit_message_text("❌ Accesso negato!")
         return
 
-    await query.edit_message_text("📝 Inserisci il nome della nuova lista:")
+    # Clear any previous creation data
+    context.user_data.clear()
+    
+    user_lang = get_user_language(user_id)
+    
+    # Show detailed instructions for list creation
+    instructions = f"""
+🆕 **Creazione Nuova Lista**
+
+📋 **Processo guidato in 4 step:**
+
+**Step 1/4:** Nome Lista
+• Inserisci un nome chiaro e descrittivo
+• Esempio: "Netflix Premium", "Spotify Family"
+
+**Step 2/4:** Costo Rinnovo  
+• Inserisci il prezzo (es: €9.99, $12.50)
+• Usa il formato: simbolo + numero
+
+**Step 3/4:** Data Scadenza
+• Formato: GG/MM/AAAA
+• Esempio: 31/12/2024
+
+**Step 4/4:** Note (opzionale)
+• Informazioni aggiuntive
+• Scrivi "nessuna" se non hai note
+
+---
+📝 **Iniziamo! Inserisci il nome della lista:**
+"""
+    
+    keyboard = [
+        [InlineKeyboardButton("❌ Annulla", callback_data='admin_lists')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(instructions, reply_markup=reply_markup)
     context.user_data['action'] = 'create_list_name'
 
 async def select_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3007,6 +3299,195 @@ Cosa vuoi fare con questa richiesta?
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(renewal_text, reply_markup=reply_markup)
+    finally:
+        session.close()
+
+async def manage_deletion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    deletion_id = int(query.data.split(':')[1])
+    user_id = query.from_user.id
+
+    if not is_admin(user_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        deletion_request = session.query(DeletionRequest).filter(DeletionRequest.id == deletion_id).first()
+        if not deletion_request:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Check if the list still exists
+        list_exists = session.query(List).filter(List.name == deletion_request.list_name).first()
+        list_status = "✅ Esiste" if list_exists else "❌ Non trovata"
+
+        deletion_text = f"""🗑️ **Richiesta Eliminazione #{deletion_request.id}**
+
+📋 **Lista:** {deletion_request.list_name}
+📊 **Stato Lista:** {list_status}
+👤 **User ID:** {deletion_request.user_id}
+📝 **Motivo:** {deletion_request.reason}
+📅 **Data richiesta:** {deletion_request.created_at.strftime('%d/%m/%Y %H:%M')}
+
+💡 **Informazioni Lista:**"""
+
+        if list_exists:
+            deletion_text += f"""
+• **Costo:** {list_exists.cost}
+• **Scadenza:** {list_exists.expiry_date.strftime('%d/%m/%Y')}
+• **Note:** {list_exists.notes if list_exists.notes else 'Nessuna'}
+"""
+        else:
+            deletion_text += "\n• Lista già eliminata o non esistente"
+
+        deletion_text += "\n❓ **Cosa vuoi fare con questa richiesta?**"
+
+        keyboard = []
+        if list_exists:
+            keyboard.append([InlineKeyboardButton("✅ Approva ed Elimina", callback_data=f'approve_deletion:{deletion_request.id}')])
+        keyboard.extend([
+            [InlineKeyboardButton("❌ Rifiuta", callback_data=f'reject_deletion:{deletion_request.id}')],
+            [InlineKeyboardButton("💬 Contatta Utente", callback_data=f'contact_deletion_user:{deletion_request.user_id}')],
+            [InlineKeyboardButton("⬅️ Indietro", callback_data='admin_deletion_requests')]
+        ])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(deletion_text, reply_markup=reply_markup)
+    finally:
+        session.close()
+
+async def approve_deletion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    deletion_id = int(query.data.split(':')[1])
+    admin_id = query.from_user.id
+
+    if not is_admin(admin_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        deletion_request = session.query(DeletionRequest).filter(DeletionRequest.id == deletion_id).first()
+        if not deletion_request:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Find and delete the list
+        list_obj = session.query(List).filter(List.name == deletion_request.list_name).first()
+        if list_obj:
+            session.delete(list_obj)
+            
+        # Update deletion request status
+        deletion_request.status = 'approved'
+        deletion_request.processed_at = datetime.now(timezone.utc)
+        deletion_request.processed_by = admin_id
+        deletion_request.admin_notes = f"Lista eliminata dall'admin {admin_id}"
+        
+        session.commit()
+
+        # Notify user
+        try:
+            user_message = f"""
+✅ **Richiesta Eliminazione Approvata**
+
+📋 **Lista:** {deletion_request.list_name}
+🗑️ **Stato:** Lista eliminata con successo
+👤 **Approvata da:** Admin
+📅 **Data:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+La lista è stata rimossa dal sistema come richiesto.
+"""
+            await send_safe_message(deletion_request.user_id, user_message)
+        except Exception as e:
+            logger.error(f"Failed to notify user {deletion_request.user_id}: {e}")
+
+        success_message = f"""
+✅ **Eliminazione Completata**
+
+📋 **Lista:** {deletion_request.list_name}
+🗑️ **Azione:** Lista eliminata dal database
+👤 **Utente:** {deletion_request.user_id} (notificato)
+📅 **Completata:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+La richiesta è stata processata con successo.
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Altre Richieste", callback_data='admin_deletion_requests')],
+            [InlineKeyboardButton("⚙️ Pannello Admin", callback_data='admin_panel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(success_message, reply_markup=reply_markup)
+
+    except Exception as e:
+        await query.edit_message_text(f"❌ Errore durante l'eliminazione: {str(e)}")
+    finally:
+        session.close()
+
+async def reject_deletion_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    deletion_id = int(query.data.split(':')[1])
+    admin_id = query.from_user.id
+
+    if not is_admin(admin_id):
+        await query.edit_message_text("❌ Accesso negato!")
+        return
+
+    session = SessionLocal()
+    try:
+        deletion_request = session.query(DeletionRequest).filter(DeletionRequest.id == deletion_id).first()
+        if not deletion_request:
+            await query.edit_message_text("❌ Richiesta non trovata.")
+            return
+
+        # Update deletion request status
+        deletion_request.status = 'rejected'
+        deletion_request.processed_at = datetime.now(timezone.utc)
+        deletion_request.processed_by = admin_id
+        deletion_request.admin_notes = f"Richiesta rifiutata dall'admin {admin_id}"
+        
+        session.commit()
+
+        # Notify user
+        try:
+            user_message = f"""
+❌ **Richiesta Eliminazione Rifiutata**
+
+📋 **Lista:** {deletion_request.list_name}
+📝 **Motivo originale:** {deletion_request.reason}
+👤 **Rifiutata da:** Admin
+📅 **Data:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+La tua richiesta di eliminazione è stata rifiutata. La lista rimane attiva nel sistema.
+
+Se hai domande, puoi aprire un ticket di supporto.
+"""
+            await send_safe_message(deletion_request.user_id, user_message)
+        except Exception as e:
+            logger.error(f"Failed to notify user {deletion_request.user_id}: {e}")
+
+        success_message = f"""
+❌ **Richiesta Rifiutata**
+
+📋 **Lista:** {deletion_request.list_name}
+👤 **Utente:** {deletion_request.user_id} (notificato)
+📅 **Rifiutata:** {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}
+
+La richiesta è stata rifiutata. La lista rimane nel sistema.
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("🗑️ Altre Richieste", callback_data='admin_deletion_requests')],
+            [InlineKeyboardButton("⚙️ Pannello Admin", callback_data='admin_panel')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(success_message, reply_markup=reply_markup)
+
+    except Exception as e:
+        await query.edit_message_text(f"❌ Errore durante il rifiuto: {str(e)}")
     finally:
         session.close()
 
@@ -4109,6 +4590,11 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(manage_renewal_callback, pattern='^manage_renewal:'))
     application.add_handler(CallbackQueryHandler(approve_renewal_callback, pattern='^approve_renewal:'))
     application.add_handler(CallbackQueryHandler(reject_renewal_callback, pattern='^reject_renewal:'))
+    
+    # Deletion request handlers
+    application.add_handler(CallbackQueryHandler(manage_deletion_callback, pattern='^manage_deletion:'))
+    application.add_handler(CallbackQueryHandler(approve_deletion_callback, pattern='^approve_deletion:'))
+    application.add_handler(CallbackQueryHandler(reject_deletion_callback, pattern='^reject_deletion:'))
     application.add_handler(CallbackQueryHandler(contest_renewal_callback, pattern='^contest_renewal:'))
 
     # Register exact match handlers (medium priority) - specific menu buttons
@@ -4129,7 +4615,7 @@ async def run_bot_main_loop():
     application.add_handler(CallbackQueryHandler(export_all_callback, pattern='^export_all$'))
 
     # Register generic button handler last (lowest priority) - catch-all for main menu buttons
-    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|user_stats|admin_alert|confirm_mass_alert|export_data)$'))
+    application.add_handler(CallbackQueryHandler(button_handler, pattern='^(admin_panel|search_list|ticket_menu|help|back_to_main|admin_renewals|admin_deletion_requests|user_stats|admin_alert|confirm_mass_alert|export_data)$'))
 
     logger.info("✅ All handlers registered successfully")
 

@@ -101,6 +101,24 @@ class RenewalRequest(Base):
     processed_at = Column(DateTime)
     processed_by = Column(Integer)  # admin user_id who processed it
 
+class DeletionRequest(Base):
+    __tablename__ = 'deletion_requests'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, index=True)
+    list_name = Column(String)
+    reason = Column(Text)  # User's reason for deletion
+    status = Column(String, default='pending')  # pending, approved, rejected
+    admin_notes = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime)
+    processed_by = Column(Integer)  # admin user_id who processed it
+
+    __table_args__ = (
+        Index('idx_deletion_user_status', 'user_id', 'status'),
+        Index('idx_deletion_status_created', 'status', 'created_at'),
+    )
+
 class TicketFeedback(Base):
     __tablename__ = 'ticket_feedbacks'
 
