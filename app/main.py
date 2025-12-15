@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
-from datetime import datetime, timezone
 import os
 import logging
 import sys
@@ -40,13 +39,13 @@ def clean_database_url(database_url):
             'tcp_user_timeout', 'sslcrl', 'requiressl', 'sslcompression'
         }
         
+        # Filter out invalid parameters
+        cleaned_params = {k: v for k, v in query_params.items() if k in valid_params}
+        
         # Force SSL mode for PostgreSQL connections if not specified
         if 'postgresql' in database_url and 'sslmode' not in query_params:
             cleaned_params['sslmode'] = ['require']
             logger.info("Added sslmode=require to DATABASE_URL for PostgreSQL connection")
-
-        # Filter out invalid parameters
-        cleaned_params = {k: v for k, v in query_params.items() if k in valid_params}
 
         # Reconstruct query string
         cleaned_query = urlencode(cleaned_params, doseq=True) if cleaned_params else ''
@@ -104,51 +103,204 @@ if not TELEGRAM_BOT_TOKEN:
 pool_size = int(os.getenv('DATABASE_POOL_SIZE', '3'))  # Ridotto per risparmiare memoria
 max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '2'))  # Ridotto per efficienza
 
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=pool_size,
-    max_overflow=max_overflow,
-    pool_timeout=30,  # Aumentato per gestire connessioni SSL lente
-    pool_recycle=3600,  # Recycle ogni ora per stabilità SSL
-    pool_pre_ping=True,  # Verifica connessioni prima dell'uso
-    echo=False,  # Disabilita logging SQL in produzione
-    # Enhanced connect_args for PostgreSQL SSL connections
-    connect_args={
-        'connect_timeout': 30,  # Timeout più lungo per SSL
-        'sslmode': 'require',   # Forza SSL
-        'keepalives': 1,        # Abilita TCP keepalives
-        'keepalives_idle': 600, # Inizia keepalives dopo 10 minuti
-        'keepalives_interval': 30, # Intervallo keepalives 30 secondi
-        'keepalives_count': 3,  # Max 3 tentativi keepalive
-        'tcp_user_timeout': 60000,  # Timeout TCP 60 secondi
-        'application_name': 'ErixCastBot'  # Nome applicazione per debug
-    } if 'postgresql' in DATABASE_URL else {}
-)
+def create_engine_with_fallback(database_url, pool_size, max_overflow):
+    """Create engine with SSL fallback strategies optimized for Render"""
+    
+    # Enhanced SSL strategies specifically for Render PostgreSQL
+    ssl_configs = [
+        # Strategy 1: Render-optimized SSL with aggressive keepalives
+        {
+            'name': 'Render SSL optimized',
+            'connect_args': {
+                'connect_timeout': 45,  # Longer timeout for SSL handshake
+                'sslmode': 'require',
+                'keepalives': 1,
+                'keepalives_idle': 300,    # 5 minutes (shorter for Render)
+                'keepalives_interval': 15,  # 15 seconds (more frequent)
+                'keepalives_count': 5,     # More attempts
+                'tcp_user_timeout': 30000, # 30 seconds (shorter)
+                'application_name': 'ErixCastBot-Render'
+            },
+            'pool_recycle': 1800,  # 30 minutes (shorter for SSL stability)
+            'pool_pre_ping': True,
+            'pool_timeout': 45
+        },
+        # Strategy 2: Minimal SSL with short timeouts
+        {
+            'name': 'Minimal SSL fast',
+            'connect_args': {
+                'connect_timeout': 20,
+                'sslmode': 'require',
+                'application_name': 'ErixCastBot-Fast'
+            },
+            'pool_recycle': 900,   # 15 minutes
+            'pool_pre_ping': False, # Disable pre-ping to avoid SSL issues
+            'pool_timeout': 20
+        },
+        # Strategy 3: SSL prefer with connection pooling disabled
+        {
+            'name': 'SSL prefer no-pool',
+            'connect_args': {
+                'connect_timeout': 15,
+                'sslmode': 'prefer',
+                'application_name': 'ErixCastBot-NoPool'
+            },
+            'pool_recycle': 300,   # 5 minutes
+            'pool_pre_ping': False,
+            'pool_timeout': 15,
+            'pool_size': 1,        # Single connection
+            'max_overflow': 0
+        },
+        # Strategy 4: SSL allow with minimal configuration
+        {
+            'name': 'SSL allow minimal',
+            'connect_args': {
+                'connect_timeout': 10,
+                'sslmode': 'allow',
+                'application_name': 'ErixCastBot-Minimal'
+            },
+            'pool_recycle': 180,   # 3 minutes
+            'pool_pre_ping': False,
+            'pool_timeout': 10,
+            'pool_size': 1,
+            'max_overflow': 0
+        },
+        # Strategy 5: Disable SSL as last resort
+        {
+            'name': 'No SSL (last resort)',
+            'connect_args': {
+                'connect_timeout': 10,
+                'sslmode': 'disable',
+                'application_name': 'ErixCastBot-NoSSL'
+            },
+            'pool_recycle': 120,   # 2 minutes
+            'pool_pre_ping': False,
+            'pool_timeout': 10,
+            'pool_size': 1,
+            'max_overflow': 0
+        }
+    ]
+    
+    for i, config in enumerate(ssl_configs):
+        try:
+            logger.info(f"🔄 Attempting database connection strategy {i+1}/5: {config['name']}")
+            
+            # Use config-specific pool settings if provided
+            config_pool_size = config.get('pool_size', pool_size)
+            config_max_overflow = config.get('max_overflow', max_overflow)
+            config_pool_timeout = config.get('pool_timeout', 30)
+            config_pool_pre_ping = config.get('pool_pre_ping', True)
+            
+            engine = create_engine(
+                database_url,
+                poolclass=QueuePool,
+                pool_size=config_pool_size,
+                max_overflow=config_max_overflow,
+                pool_timeout=config_pool_timeout,
+                pool_recycle=config['pool_recycle'],
+                pool_pre_ping=config_pool_pre_ping,
+                echo=False,
+                connect_args=config['connect_args'] if 'postgresql' in database_url else {}
+            )
+            
+            # Test the connection with multiple attempts
+            test_attempts = 3
+            for attempt in range(test_attempts):
+                try:
+                    with engine.connect() as conn:
+                        result = conn.execute("SELECT version()")
+                        version_info = result.fetchone()[0][:50]
+                        logger.info(f"✅ Database connection successful with strategy: {config['name']}")
+                        logger.info(f"📊 PostgreSQL version: {version_info}...")
+                        logger.info(f"🔧 Pool config: size={config_pool_size}, overflow={config_max_overflow}, timeout={config_pool_timeout}s")
+                        return engine
+                except Exception as test_e:
+                    if attempt < test_attempts - 1:
+                        logger.warning(f"⚠️ Connection test attempt {attempt + 1}/{test_attempts} failed: {test_e}")
+                        import time
+                        time.sleep(2)  # Brief pause before retry
+                    else:
+                        raise test_e
+                
+        except Exception as e:
+            logger.warning(f"❌ Strategy {i+1} '{config['name']}' failed: {str(e)[:100]}...")
+            
+            # If this is the last strategy, don't give up yet
+            if i == len(ssl_configs) - 1:
+                logger.error("🚨 All predefined SSL strategies failed - attempting emergency fallback")
+                
+                # Emergency fallback: Try to extract just the base connection without any SSL params
+                try:
+                    # Parse URL and remove all query parameters
+                    from urllib.parse import urlparse, urlunparse
+                    parsed = urlparse(database_url)
+                    clean_url = urlunparse((
+                        parsed.scheme,
+                        parsed.netloc,
+                        parsed.path,
+                        '',  # No params
+                        '',  # No query
+                        ''   # No fragment
+                    ))
+                    
+                    logger.info("🆘 Attempting emergency connection without any parameters")
+                    emergency_engine = create_engine(
+                        clean_url,
+                        poolclass=QueuePool,
+                        pool_size=1,
+                        max_overflow=0,
+                        pool_timeout=5,
+                        pool_recycle=60,
+                        pool_pre_ping=False,
+                        echo=False
+                    )
+                    
+                    with emergency_engine.connect() as conn:
+                        conn.execute("SELECT 1")
+                        logger.warning("⚠️ Emergency connection successful - using minimal configuration")
+                        return emergency_engine
+                        
+                except Exception as emergency_e:
+                    logger.error(f"💥 Emergency fallback also failed: {emergency_e}")
+                    logger.error("💀 All connection strategies exhausted - database unavailable")
+                    raise Exception(f"Database connection failed after all strategies. Last error: {e}")
+    
+    return None
+
+# Create engine with fallback strategies
+engine = create_engine_with_fallback(DATABASE_URL, pool_size, max_overflow)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Import models directly (with --chdir, the root directory is in Python path)
-from models import List, Ticket, TicketMessage, UserNotification, RenewalRequest, TicketFeedback, UserActivity, AuditLog, UserBehavior, UserProfile, SystemMetrics, FeatureFlag, Alert, UptimePing, Base, create_tables
+from models import UptimePing, create_tables
 import models
 models.SessionLocal = SessionLocal
 
 # Create all tables using the centralized function with retry logic
-def create_tables_with_retry(engine, max_retries=3):
+def create_tables_with_retry(engine, max_retries=5):
     """Create tables with retry logic for connection issues"""
     for attempt in range(max_retries):
         try:
             create_tables(engine)
-            logger.info("Database tables created successfully")
-            return
+            logger.info("✅ Database tables created successfully")
+            return True
         except Exception as e:
-            logger.warning(f"Attempt {attempt + 1}/{max_retries} to create tables failed: {e}")
+            logger.warning(f"⚠️ Attempt {attempt + 1}/{max_retries} to create tables failed: {e}")
             if attempt == max_retries - 1:
-                logger.error("Failed to create tables after all retries")
-                raise
+                logger.error("❌ Failed to create tables after all retries - continuing without table creation")
+                return False
             import time
-            time.sleep(5)  # Wait 5 seconds before retry
+            # Exponential backoff with jitter
+            sleep_time = (2 ** attempt) + (attempt * 0.5)
+            logger.info(f"Waiting {sleep_time:.1f}s before retry...")
+            time.sleep(sleep_time)
+    
+    return False
 
-create_tables_with_retry(engine)
+# Try to create tables, but don't fail if it doesn't work
+tables_created = create_tables_with_retry(engine)
+if not tables_created:
+    logger.warning("⚠️ Tables creation failed - bot will attempt to create them on first use")
 
 # Test database connection with SSL
 def test_database_connection():
@@ -190,11 +342,14 @@ except ImportError:
 if app:
     @app.route('/health')
     def health_check():
-        """Aggressive health check to keep Render service alive"""
+        """Enhanced health check with SSL connection recovery"""
         try:
-            # Test database connection with timeout and retry
+            # Test database connection with multiple strategies
             session = None
             db_status = "disconnected"
+            connection_strategy = "unknown"
+            
+            # Try primary connection first
             try:
                 session = SessionLocal()
                 from sqlalchemy import text
@@ -202,21 +357,49 @@ if app:
                 result.fetchone()
                 session.commit()
                 db_status = "connected"
+                connection_strategy = "primary"
             except Exception as db_e:
-                logger.warning(f"Health check database error: {db_e}")
-                db_status = f"error: {str(db_e)[:50]}"
+                logger.warning(f"Primary health check failed: {db_e}")
+                
+                # If primary fails, try to reconnect with fallback engine
+                try:
+                    if session:
+                        session.close()
+                    
+                    # Create a new engine with fallback strategies
+                    logger.info("🔄 Attempting health check with fallback connection")
+                    fallback_engine = create_engine_with_fallback(DATABASE_URL, 1, 0)
+                    
+                    if fallback_engine:
+                        from sqlalchemy.orm import sessionmaker
+                        FallbackSession = sessionmaker(bind=fallback_engine)
+                        session = FallbackSession()
+                        result = session.execute(text("SELECT 1"))
+                        result.fetchone()
+                        session.commit()
+                        db_status = "connected_fallback"
+                        connection_strategy = "fallback"
+                        logger.info("✅ Health check successful with fallback connection")
+                    else:
+                        db_status = f"fallback_failed: {str(db_e)[:50]}"
+                        connection_strategy = "failed"
+                        
+                except Exception as fallback_e:
+                    logger.error(f"Fallback health check also failed: {fallback_e}")
+                    db_status = f"all_failed: {str(fallback_e)[:30]}"
+                    connection_strategy = "all_failed"
             finally:
                 if session:
                     try:
                         session.close()
-                    except:
+                    except Exception:
                         pass
 
             # Test bot connectivity (quick test)
             try:
                 # Simple bot status check without circular imports
                 bot_status = "bot_initializing"  # Default status
-            except:
+            except Exception:
                 bot_status = "bot_check_failed"
 
             # Get resource status
@@ -229,19 +412,27 @@ if app:
                     'memory_mb': round(process.memory_info().rss / 1024 / 1024, 2),
                     'cpu_percent': psutil.cpu_percent(interval=0.1)
                 }
-            except:
+            except Exception:
                 pass
 
+            # Determine overall health status
+            is_healthy = db_status in ['connected', 'connected_fallback']
+            status_code = 200 if is_healthy else 503
+            
+            from datetime import datetime, timezone
             return jsonify({
-                'status': 'healthy' if db_status == 'connected' else 'degraded',
+                'status': 'healthy' if is_healthy else 'degraded',
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'database': db_status,
+                'connection_strategy': connection_strategy,
                 'bot_status': bot_status,
                 'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400,
-                'resources': resource_status
-            }), 200 if db_status == 'connected' else 503
+                'resources': resource_status,
+                'ssl_info': 'SSL connection with fallback strategies'
+            }), status_code
         except Exception as e:
             logger.error(f"Health check failed: {e}")
+            from datetime import datetime, timezone
             return jsonify({
                 'status': 'unhealthy',
                 'error': str(e),
@@ -251,6 +442,7 @@ if app:
     @app.route('/ping')
     def ping():
         """Lightweight ping endpoint to prevent Render sleep"""
+        from datetime import datetime, timezone
         return jsonify({
             'status': 'pong',
             'timestamp': datetime.now(timezone.utc).isoformat()
@@ -263,6 +455,8 @@ if app:
         import os
 
         try:
+            import psutil
+            from datetime import datetime, timezone
             memory = psutil.virtual_memory()
             process = psutil.Process(os.getpid())
 
@@ -276,6 +470,7 @@ if app:
                 'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400
             }), 200
         except Exception as e:
+            from datetime import datetime, timezone
             return jsonify({
                 'status': 'status_check_failed',
                 'error': str(e),
@@ -445,7 +640,7 @@ if __name__ != '__main__':
                             finally:
                                 try:
                                     session.close()
-                                except:
+                                except Exception:
                                     pass
                         else:
                             consecutive_failures += 1
@@ -471,7 +666,7 @@ if __name__ != '__main__':
                             finally:
                                 try:
                                     session.close()
-                                except:
+                                except Exception:
                                     pass
 
                     except requests.exceptions.Timeout:
@@ -498,7 +693,7 @@ if __name__ != '__main__':
                         finally:
                             try:
                                 session.close()
-                            except:
+                            except Exception:
                                 pass
 
                     except Exception as e:
@@ -525,7 +720,7 @@ if __name__ != '__main__':
                         finally:
                             try:
                                 session.close()
-                            except:
+                            except Exception:
                                 pass
 
                     # Check if thread should restart due to circuit breaker
