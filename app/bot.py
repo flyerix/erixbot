@@ -4222,19 +4222,39 @@ async def run_bot_main_loop():
         return
 
 def main():
-    # Set up signal handlers for graceful shutdown
+    # Set up signal handlers for graceful shutdown (only in main thread)
     try:
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-    except ValueError:
-        logger.warning("Signal handling not available - graceful shutdown disabled")
+        import threading
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            logger.info("✅ Signal handlers set up for graceful shutdown")
+        else:
+            logger.info("ℹ️ Running in thread - signal handlers disabled")
+    except (ValueError, OSError) as e:
+        logger.warning(f"Signal handling not available: {e} - graceful shutdown disabled")
 
     # Simple startup - remove complex circuit breaker and lock file logic that might cause issues
     logger.info("Starting bot...")
 
     try:
         import asyncio
-        asyncio.run(run_bot_main_loop())
+        import threading
+        
+        # Check if we're in the main thread
+        if threading.current_thread() is threading.main_thread():
+            # Main thread - use asyncio.run()
+            logger.info("🚀 Starting bot in main thread")
+            asyncio.run(run_bot_main_loop())
+        else:
+            # Secondary thread - create new event loop
+            logger.info("🚀 Starting bot in secondary thread")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_bot_main_loop())
+            finally:
+                loop.close()
         logger.info("✅ Bot shutdown gracefully")
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
