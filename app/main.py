@@ -42,10 +42,9 @@ def clean_database_url(database_url):
         # Filter out invalid parameters
         cleaned_params = {k: v for k, v in query_params.items() if k in valid_params}
         
-        # Force SSL mode for PostgreSQL connections if not specified
-        if 'postgresql' in database_url and 'sslmode' not in query_params:
-            cleaned_params['sslmode'] = ['require']
-            logger.info("Added sslmode=require to DATABASE_URL for PostgreSQL connection")
+        # DO NOT force SSL mode - let connection strategies handle SSL configuration
+        # The create_engine_with_fallback function will set appropriate SSL modes
+        # Forcing sslmode=require here breaks the no-SSL-first strategy
 
         # Reconstruct query string
         cleaned_query = urlencode(cleaned_params, doseq=True) if cleaned_params else ''
@@ -74,33 +73,15 @@ def clean_database_url(database_url):
 # Apply Render SSL fixes if on Render
 if os.getenv('RENDER'):
     try:
-        # First, try the aggressive connection test to find what works
-        logger.info("🔍 Running aggressive connection test for Render PostgreSQL")
+        # Apply minimal SSL fixes for Render (skip complex connection testing)
+        logger.info("🔧 Applying minimal Render SSL configuration")
         try:
-            import subprocess
-            import sys
-            result = subprocess.run([sys.executable, 'test_render_connection.py'], 
-                                  capture_output=True, text=True, timeout=60)
-            if result.returncode == 0:
-                logger.info("✅ Connection test successful - optimal URL set")
-            else:
-                logger.warning(f"⚠️ Connection test failed: {result.stderr}")
-                # Fall back to render_ssl_fix
-                from render_ssl_fix import fix_render_database_url, set_ssl_environment
-                set_ssl_environment()
-                fixed_url = fix_render_database_url()
-                if fixed_url:
-                    os.environ['DATABASE_URL'] = fixed_url
-                    logger.info("Applied fallback Render SSL fixes")
-        except Exception as test_e:
-            logger.warning(f"Connection test failed: {test_e}")
-            # Fall back to render_ssl_fix
-            from render_ssl_fix import fix_render_database_url, set_ssl_environment
+            from render_ssl_fix import set_ssl_environment
             set_ssl_environment()
-            fixed_url = fix_render_database_url()
-            if fixed_url:
-                os.environ['DATABASE_URL'] = fixed_url
-                logger.info("Applied fallback Render SSL fixes")
+            logger.info("✅ Render SSL environment configured")
+        except Exception as ssl_e:
+            logger.warning(f"SSL environment setup failed: {ssl_e}")
+            # Continue anyway - the direct URL approach should work
     except ImportError:
         logger.warning("Render SSL fix module not available")
     except Exception as e:
@@ -112,8 +93,11 @@ if not DATABASE_URL:
     logger.error("DATABASE_URL environment variable is required")
     raise ValueError("DATABASE_URL environment variable is required")
 
-# Clean DATABASE_URL to remove invalid psycopg2 parameters
-DATABASE_URL = clean_database_url(DATABASE_URL)
+# Clean DATABASE_URL to remove invalid psycopg2 parameters (skip on Render for SSL flexibility)
+if not os.getenv('RENDER'):
+    DATABASE_URL = clean_database_url(DATABASE_URL)
+else:
+    logger.info("🔧 Skipping URL cleaning on Render to preserve SSL strategy flexibility")
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 if not TELEGRAM_BOT_TOKEN:
@@ -125,115 +109,109 @@ pool_size = int(os.getenv('DATABASE_POOL_SIZE', '3'))  # Ridotto per risparmiare
 max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '2'))  # Ridotto per efficienza
 
 def create_engine_with_fallback(database_url, pool_size, max_overflow):
-    """Create engine with aggressive SSL workarounds for Render PostgreSQL"""
+    """Create engine with direct URL manipulation for Render PostgreSQL"""
     
-    # RADICAL APPROACH: Start with the most stable configurations first
-    # Based on Render PostgreSQL SSL instability, prioritize non-SSL and minimal SSL
+    # ULTRA-DIRECT APPROACH: Manually create URLs with different SSL modes
+    # This bypasses all URL parsing issues and directly tests what works
+    
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(database_url)
+    
+    # Create base URL without any query parameters
+    base_url = urlunparse((
+        parsed.scheme,
+        parsed.netloc, 
+        parsed.path,
+        '',  # No params
+        '',  # No query
+        ''   # No fragment
+    ))
+    
+    # Direct URL strategies - manually construct each one
     ssl_configs = [
-        # Strategy 1: NO SSL - Most stable for Render (try first)
+        # Strategy 1: NO SSL - Direct URL construction
         {
-            'name': 'No SSL (most stable)',
-            'connect_args': {
-                'connect_timeout': 15,
-                'sslmode': 'disable',
-                'application_name': 'ErixCastBot-NoSSL'
-            },
-            'pool_recycle': 300,   # 5 minutes
+            'name': 'Direct No SSL',
+            'url': f"{base_url}?sslmode=disable&connect_timeout=15&application_name=ErixCastBot-NoSSL",
+            'pool_recycle': 300,
             'pool_pre_ping': False,
             'pool_timeout': 15,
-            'pool_size': 1,        # Single connection for stability
+            'pool_size': 1,
             'max_overflow': 0
         },
-        # Strategy 2: SSL Allow (fallback to non-SSL if needed)
+        # Strategy 2: Completely bare URL (no parameters at all)
         {
-            'name': 'SSL allow (flexible)',
-            'connect_args': {
-                'connect_timeout': 20,
-                'sslmode': 'allow',
-                'application_name': 'ErixCastBot-Flexible'
-            },
-            'pool_recycle': 600,   # 10 minutes
+            'name': 'Bare URL (no params)',
+            'url': base_url,
+            'pool_recycle': 180,
+            'pool_pre_ping': False,
+            'pool_timeout': 10,
+            'pool_size': 1,
+            'max_overflow': 0
+        },
+        # Strategy 3: SSL Allow
+        {
+            'name': 'Direct SSL Allow',
+            'url': f"{base_url}?sslmode=allow&connect_timeout=20&application_name=ErixCastBot-Allow",
+            'pool_recycle': 600,
             'pool_pre_ping': False,
             'pool_timeout': 20,
             'pool_size': 1,
             'max_overflow': 0
         },
-        # Strategy 3: SSL Prefer (try SSL but allow fallback)
+        # Strategy 4: SSL Prefer
         {
-            'name': 'SSL prefer (fallback)',
-            'connect_args': {
-                'connect_timeout': 25,
-                'sslmode': 'prefer',
-                'application_name': 'ErixCastBot-Prefer'
-            },
-            'pool_recycle': 900,   # 15 minutes
+            'name': 'Direct SSL Prefer',
+            'url': f"{base_url}?sslmode=prefer&connect_timeout=25&application_name=ErixCastBot-Prefer",
+            'pool_recycle': 900,
             'pool_pre_ping': False,
             'pool_timeout': 25,
             'pool_size': 2,
             'max_overflow': 0
         },
-        # Strategy 4: Minimal SSL Required (if SSL is mandatory)
+        # Strategy 5: SSL Required (last resort)
         {
-            'name': 'Minimal SSL required',
-            'connect_args': {
-                'connect_timeout': 30,
-                'sslmode': 'require',
-                'application_name': 'ErixCastBot-MinSSL'
-            },
-            'pool_recycle': 1200,  # 20 minutes
+            'name': 'Direct SSL Required',
+            'url': f"{base_url}?sslmode=require&connect_timeout=30&application_name=ErixCastBot-Required",
+            'pool_recycle': 1200,
             'pool_pre_ping': False,
             'pool_timeout': 30,
             'pool_size': 2,
             'max_overflow': 1
-        },
-        # Strategy 5: Full SSL (last resort - most likely to fail)
-        {
-            'name': 'Full SSL (last resort)',
-            'connect_args': {
-                'connect_timeout': 45,
-                'sslmode': 'require',
-                'keepalives': 1,
-                'keepalives_idle': 600,
-                'keepalives_interval': 30,
-                'keepalives_count': 3,
-                'application_name': 'ErixCastBot-FullSSL'
-            },
-            'pool_recycle': 1800,  # 30 minutes
-            'pool_pre_ping': True,
-            'pool_timeout': 45,
-            'pool_size': 3,
-            'max_overflow': 2
         }
     ]
     
     for i, config in enumerate(ssl_configs):
         try:
             logger.info(f"🔄 Attempting database connection strategy {i+1}/5: {config['name']}")
+            logger.info(f"🔗 Using URL: {config['url'][:80]}...")
             
-            # Use config-specific pool settings if provided
+            # Use config-specific pool settings
             config_pool_size = config.get('pool_size', pool_size)
             config_max_overflow = config.get('max_overflow', max_overflow)
             config_pool_timeout = config.get('pool_timeout', 30)
-            config_pool_pre_ping = config.get('pool_pre_ping', True)
+            config_pool_pre_ping = config.get('pool_pre_ping', False)
             
+            # Create engine with the specific URL (no connect_args needed)
             engine = create_engine(
-                database_url,
+                config['url'],  # Use the pre-constructed URL
                 poolclass=QueuePool,
                 pool_size=config_pool_size,
                 max_overflow=config_max_overflow,
                 pool_timeout=config_pool_timeout,
                 pool_recycle=config['pool_recycle'],
                 pool_pre_ping=config_pool_pre_ping,
-                echo=False,
-                connect_args=config['connect_args'] if 'postgresql' in database_url else {}
+                echo=False
+                # No connect_args - everything is in the URL
             )
             
             # Test the connection with multiple attempts
-            test_attempts = 3
+            test_attempts = 2  # Reduced attempts for faster failover
             for attempt in range(test_attempts):
                 try:
                     with engine.connect() as conn:
-                        result = conn.execute("SELECT version()")
+                        from sqlalchemy import text
+                        result = conn.execute(text("SELECT version()"))
                         version_info = result.fetchone()[0][:50]
                         logger.info(f"✅ Database connection successful with strategy: {config['name']}")
                         logger.info(f"📊 PostgreSQL version: {version_info}...")
@@ -243,52 +221,41 @@ def create_engine_with_fallback(database_url, pool_size, max_overflow):
                     if attempt < test_attempts - 1:
                         logger.warning(f"⚠️ Connection test attempt {attempt + 1}/{test_attempts} failed: {test_e}")
                         import time
-                        time.sleep(2)  # Brief pause before retry
+                        time.sleep(1)  # Brief pause before retry
                     else:
                         raise test_e
                 
         except Exception as e:
             logger.warning(f"❌ Strategy {i+1} '{config['name']}' failed: {str(e)[:100]}...")
+            continue  # Try next strategy immediately
+    
+    # If we get here, all strategies failed
+    logger.error("💥 All connection strategies failed!")
+    logger.error("🔍 Attempting final diagnostic connection...")
+    
+    # Final diagnostic attempt with minimal configuration
+    try:
+        diagnostic_engine = create_engine(
+            base_url,  # Completely bare URL
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=5,
+            pool_recycle=30,
+            pool_pre_ping=False,
+            echo=True  # Enable echo for debugging
+        )
+        
+        with diagnostic_engine.connect() as conn:
+            from sqlalchemy import text
+            result = conn.execute(text("SELECT 1"))
+            result.fetchone()
+            logger.warning("⚠️ Diagnostic connection successful with bare URL")
+            return diagnostic_engine
             
-            # If this is the last strategy, don't give up yet
-            if i == len(ssl_configs) - 1:
-                logger.error("🚨 All predefined SSL strategies failed - attempting emergency fallback")
-                
-                # Emergency fallback: Try to extract just the base connection without any SSL params
-                try:
-                    # Parse URL and remove all query parameters
-                    from urllib.parse import urlparse, urlunparse
-                    parsed = urlparse(database_url)
-                    clean_url = urlunparse((
-                        parsed.scheme,
-                        parsed.netloc,
-                        parsed.path,
-                        '',  # No params
-                        '',  # No query
-                        ''   # No fragment
-                    ))
-                    
-                    logger.info("🆘 Attempting emergency connection without any parameters")
-                    emergency_engine = create_engine(
-                        clean_url,
-                        poolclass=QueuePool,
-                        pool_size=1,
-                        max_overflow=0,
-                        pool_timeout=5,
-                        pool_recycle=60,
-                        pool_pre_ping=False,
-                        echo=False
-                    )
-                    
-                    with emergency_engine.connect() as conn:
-                        conn.execute("SELECT 1")
-                        logger.warning("⚠️ Emergency connection successful - using minimal configuration")
-                        return emergency_engine
-                        
-                except Exception as emergency_e:
-                    logger.error(f"💥 Emergency fallback also failed: {emergency_e}")
-                    logger.error("💀 All connection strategies exhausted - database unavailable")
-                    raise Exception(f"Database connection failed after all strategies. Last error: {e}")
+    except Exception as diagnostic_e:
+        logger.error(f"💀 Diagnostic connection also failed: {diagnostic_e}")
+        logger.error("🚨 DATABASE COMPLETELY UNAVAILABLE - Check Render PostgreSQL status")
+        raise Exception(f"All database connection attempts failed. Last diagnostic error: {diagnostic_e}")
     
     return None
 
