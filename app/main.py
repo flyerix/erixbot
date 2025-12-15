@@ -72,20 +72,9 @@ def clean_database_url(database_url):
 
 # Apply Render SSL fixes if on Render
 if os.getenv('RENDER'):
-    try:
-        # Apply minimal SSL fixes for Render (skip complex connection testing)
-        logger.info("🔧 Applying minimal Render SSL configuration")
-        try:
-            from render_ssl_fix import set_ssl_environment
-            set_ssl_environment()
-            logger.info("✅ Render SSL environment configured")
-        except Exception as ssl_e:
-            logger.warning(f"SSL environment setup failed: {ssl_e}")
-            # Continue anyway - the direct URL approach should work
-    except ImportError:
-        logger.warning("Render SSL fix module not available")
-    except Exception as e:
-        logger.warning(f"Failed to apply Render SSL fixes: {e}")
+    # SQLite autonomous mode - no SSL configuration needed
+    logger.info("🔧 SQLite autonomous mode - no SSL configuration needed")
+    logger.info("✅ Using persistent SQLite database (no external dependencies)")
 
 # Environment validation
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -116,9 +105,9 @@ os.makedirs(os.path.join(PERSISTENT_DATA_DIR, "backups"), exist_ok=True)
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 logger.info(f"🔧 Using persistent SQLite database: {DATABASE_PATH}")
 
-# SQLite non ha bisogno di pool configuration
-pool_size = 1
-max_overflow = 0
+# SQLite pool configuration ottimizzata per concorrenza
+pool_size = 5  # Increased for concurrent access
+max_overflow = 10  # Allow overflow connections
 
 def create_sqlite_engine(database_url):
     """Create SQLite engine for autonomous bot operation"""
@@ -133,19 +122,19 @@ def create_sqlite_engine(database_url):
         logger.info(f"📁 Creating database directory: {db_dir}")
         os.makedirs(db_dir, exist_ok=True)
     
-    # Crea engine SQLite ottimizzato
+    # Crea engine SQLite ottimizzato per concorrenza
     engine = create_engine(
         database_url,
-        pool_size=1,
-        max_overflow=0,
-        pool_timeout=30,
+        pool_size=5,  # Increased from 1 to handle concurrent requests
+        max_overflow=10,  # Allow overflow connections
+        pool_timeout=60,  # Increased timeout to prevent timeouts
         pool_recycle=3600,  # 1 ora
         pool_pre_ping=False,
         echo=False,
-        # Ottimizzazioni SQLite
+        # Ottimizzazioni SQLite per accesso concorrente
         connect_args={
             "check_same_thread": False,  # Permette accesso multi-thread
-            "timeout": 30,  # Timeout per lock
+            "timeout": 60,  # Increased timeout per lock
         }
     )
     
