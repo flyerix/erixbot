@@ -122,17 +122,21 @@ class BackgroundTaskManager:
 
     async def process_queued_tasks(self):
         """Process tasks from the queue when slots become available"""
-        while not self.task_queue.empty() and len(self.tasks) < self.max_concurrent_tasks:
-            try:
-                coro, args, kwargs, task_id = self.task_queue.get_nowait()
-                task = asyncio.create_task(self._execute_task(coro, args, kwargs, task_id))
-                self.tasks.append(task)
-                task.add_done_callback(lambda t: self._cleanup_task(t, task_id))
-                logger.info(f"Processed queued task: {task_id}")
-            except asyncio.QueueEmpty:
-                break
-            except Exception as e:
-                logger.error(f"Error processing queued task: {e}")
+        try:
+            while not self.task_queue.empty() and len(self.tasks) < self.max_concurrent_tasks:
+                try:
+                    coro, args, kwargs, task_id = self.task_queue.get_nowait()
+                    task = asyncio.create_task(self._execute_task(coro, args, kwargs, task_id))
+                    self.tasks.append(task)
+                    task.add_done_callback(lambda t: self._cleanup_task(t, task_id))
+                    logger.info(f"Processed queued task: {task_id}")
+                except asyncio.QueueEmpty:
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing queued task: {e}")
+        except Exception as e:
+            logger.error(f"Error in process_queued_tasks: {e}")
+            # Ensure this method always completes without raising exceptions
 
     def shutdown(self) -> None:
         """Shutdown the task manager"""

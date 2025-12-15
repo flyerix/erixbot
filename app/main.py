@@ -351,23 +351,27 @@ def test_database_connection():
         logger.warning("⚠️ Database not available for connection test")
         return False
     
-    max_retries = 5
+    max_retries = 3
     for attempt in range(max_retries):
         try:
             session = SessionLocal()
             from sqlalchemy import text
-            result = session.execute(text("SELECT version()"))
-            version = result.fetchone()[0]
+            # Use SQLite compatible query instead of PostgreSQL version()
+            result = session.execute(text("SELECT 1 as test"))
+            test_result = result.fetchone()[0]
             session.close()
-            logger.info(f"Database connection successful - PostgreSQL version: {version[:50]}...")
-            return True
+            if test_result == 1:
+                logger.info("Database connection successful - SQLite database operational")
+                return True
+            else:
+                raise Exception("Unexpected test result")
         except Exception as e:
             logger.warning(f"Database connection attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt == max_retries - 1:
                 logger.error("Database connection failed after all retries")
                 return False
             import time
-            time.sleep(2 ** attempt)  # Exponential backoff
+            time.sleep(1 + attempt)  # Linear backoff for SQLite
     return False
 
 # Test connection at startup only if database was initialized
@@ -479,9 +483,14 @@ if app:
             # Get database statistics
             db_stats = get_database_stats()
             
+            # Fix timezone issue - use consistent UTC datetime
+            current_time = datetime.now(timezone.utc)
+            start_of_day = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            uptime_seconds = int((current_time - start_of_day).total_seconds())
+            
             return jsonify({
                 'status': service_status,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'timestamp': current_time.isoformat(),
                 'database': {
                     'status': db_status,
                     'type': 'sqlite_persistent',
@@ -493,7 +502,7 @@ if app:
                     'path': DATABASE_PATH if database_available else 'unavailable'
                 },
                 'bot_status': bot_status,
-                'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400,
+                'uptime_seconds': uptime_seconds,
                 'resources': resource_status,
                 'autonomous_operation': {
                     'enabled': True,
@@ -539,7 +548,7 @@ if app:
                 'memory_percent': memory.percent,
                 'cpu_percent': psutil.cpu_percent(interval=0.1),
                 'process_memory_mb': round(process.memory_info().rss / 1024 / 1024, 2),
-                'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400
+                'uptime_seconds': int((datetime.now(timezone.utc).replace(tzinfo=None) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400
             }), 200
         except Exception as e:
             from datetime import datetime, timezone

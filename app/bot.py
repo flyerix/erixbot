@@ -1144,18 +1144,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for notif in notifications:
                     lst = session.query(List).filter(List.name == notif.list_name).first()
                     if lst and lst.expiry_date:
-                        # Ensure consistent timezone handling - convert to UTC-aware if naive
-                        if lst.expiry_date.tzinfo is None:
-                            # Assume naive datetimes are in UTC (database default)
-                            expiry_aware = lst.expiry_date.replace(tzinfo=timezone.utc)
-                        else:
-                            expiry_aware = lst.expiry_date
-    
-                        # Calculate days until expiry in UTC
-                        now_utc = datetime.now(timezone.utc)
-                        days_until = (expiry_aware - now_utc).days
-                        if days_until >= 0:
-                            stats_text += f"• {lst.name}: {days_until} giorni\n"
+                        try:
+                            # Ensure consistent timezone handling - convert to UTC-aware if naive
+                            if lst.expiry_date.tzinfo is None:
+                                # Assume naive datetimes are in UTC (database default)
+                                expiry_aware = lst.expiry_date.replace(tzinfo=timezone.utc)
+                            else:
+                                expiry_aware = lst.expiry_date
+        
+                            # Calculate days until expiry in UTC
+                            now_utc = datetime.now(timezone.utc)
+                            days_until = (expiry_aware - now_utc).days
+                            if days_until >= 0:
+                                stats_text += f"• {lst.name}: {days_until} giorni\n"
+                        except Exception as tz_e:
+                            logger.warning(f"Timezone calculation error for list {lst.name}: {tz_e}")
+                            # Fallback: show list without days calculation
+                            stats_text += f"• {lst.name}: scadenza da verificare\n"
 
             keyboard = [
                 [InlineKeyboardButton("📤 Esporta Dati", callback_data='export_data')],
@@ -4965,8 +4970,14 @@ async def run_bot_main_loop():
         # Pianifica promemoria personalizzati ogni giorno alle 10:00
         scheduler.add_job(send_custom_reminders, CronTrigger(hour=10, minute=0))  # Ogni giorno alle 10:00
 
-        # Enhanced background tasks
-        scheduler.add_job(lambda: task_manager.process_queued_tasks(), CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
+        # Enhanced background tasks - fix coroutine warning
+        async def process_queued_tasks_wrapper():
+            try:
+                await task_manager.process_queued_tasks()
+            except Exception as e:
+                logger.error(f"Error in scheduled process_queued_tasks: {e}")
+        
+        scheduler.add_job(process_queued_tasks_wrapper, CronTrigger(minute='*/5'))  # Process queued tasks every 5 minutes
         scheduler.add_job(lambda: memory_manager.perform_cleanup() if memory_manager.should_cleanup() else None, CronTrigger(minute='*/30'))  # Memory cleanup every 30 minutes
 
         # Enhanced backup scheduling - more frequent for better data safety
