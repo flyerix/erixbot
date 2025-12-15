@@ -405,17 +405,18 @@ if app:
             connection_strategy = "unknown"
             
             # Check if database is available
-            if not database_available or not SessionLocal:
-                # Try to reconnect
-                if retry_database_connection():
-                    db_status = "reconnected"
-                    connection_strategy = "retry_success"
+            session = None
+            try:
+                if not database_available or not SessionLocal:
+                    # Try to reconnect
+                    if retry_database_connection():
+                        db_status = "reconnected"
+                        connection_strategy = "retry_success"
+                    else:
+                        db_status = "unavailable"
+                        connection_strategy = "no_connection"
                 else:
-                    db_status = "unavailable"
-                    connection_strategy = "no_connection"
-            else:
-                # Try primary connection
-                try:
+                    # Try primary connection
                     session = SessionLocal()
                     from sqlalchemy import text
                     result = session.execute(text("SELECT 1"))
@@ -423,16 +424,16 @@ if app:
                     session.commit()
                     db_status = "connected"
                     connection_strategy = "primary"
-                except Exception as db_e:
-                    logger.warning(f"Primary health check failed: {db_e}")
-                    
-                    # Try to reconnect
-                    if retry_database_connection():
-                        db_status = "reconnected"
-                        connection_strategy = "retry_success"
-                    else:
-                        db_status = f"failed: {str(db_e)[:50]}"
-                        connection_strategy = "failed"
+            except Exception as db_e:
+                logger.warning(f"Primary health check failed: {db_e}")
+                
+                # Try to reconnect
+                if retry_database_connection():
+                    db_status = "reconnected"
+                    connection_strategy = "retry_success"
+                else:
+                    db_status = f"failed: {str(db_e)[:50]}"
+                    connection_strategy = "failed"
             finally:
                 if session:
                     try:
