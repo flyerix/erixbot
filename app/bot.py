@@ -3750,6 +3750,8 @@ async def start_bot_with_retry(max_retries=3):
 
 async def run_bot_main_loop():
     """Loop principale del bot con gestione errori migliorata"""
+    global USE_WEBHOOK  # Dichiarazione global per modificare la variabile
+    
     # Create PID file to prevent multiple instances
     create_pid_file()
 
