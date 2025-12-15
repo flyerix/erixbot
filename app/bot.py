@@ -4289,12 +4289,24 @@ async def run_bot_main_loop():
                 pool_timeout=30
             )
             
-            # Keep the bot running
+            # Keep the bot running with infinite loop
             try:
-                # Run until stopped - use application.idle() not updater.idle()
-                await application.idle()
+                logger.info("✅ Bot polling started successfully - listening for messages...")
+                # Keep the bot alive with infinite loop
+                while True:
+                    await asyncio.sleep(60)  # Check every minute
+                    
+                    # Monitor resources every 5 minutes
+                    if int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 300 == 0:
+                        if resource_monitor.check_memory_usage():
+                            logger.warning("🔄 Memory threshold exceeded - triggering restart")
+                            # Exit to trigger Render restart
+                            return
+                    
+                    logger.debug("Polling mode active - bot ready")
             finally:
                 # Cleanup
+                logger.info("🛑 Stopping polling mode...")
                 await updater.stop()
                 await application.stop()
                 await application.shutdown()
