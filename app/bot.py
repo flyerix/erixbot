@@ -4584,12 +4584,42 @@ async def start_bot_with_retry(max_retries=3):
 
     return False
 
+async def resolve_bot_instance_conflict():
+    """Resolve Telegram bot instance conflicts by clearing webhooks and waiting"""
+    logger.info("🔧 Resolving bot instance conflict...")
+    
+    try:
+        # Create a temporary bot instance just for cleanup
+        temp_bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+        
+        # Delete any existing webhooks
+        await temp_bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Webhooks cleared")
+        
+        # Wait a bit for Telegram to process the webhook deletion
+        await asyncio.sleep(5)
+        
+        # Get bot info to verify connection
+        bot_info = await temp_bot.get_me()
+        logger.info(f"✅ Bot connection verified: @{bot_info.username} (ID: {bot_info.id})")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to resolve bot conflict: {e}")
+        return False
+
 async def run_bot_main_loop():
     """Loop principale del bot con gestione errori migliorata"""
     global USE_WEBHOOK  # Dichiarazione global per modificare la variabile
     
     # Create PID file to prevent multiple instances
     create_pid_file()
+    
+    # Resolve any existing bot instance conflicts
+    if not await resolve_bot_instance_conflict():
+        logger.critical("❌ Could not resolve bot instance conflict - exiting")
+        return
 
     # Additional stability check - verify database connection before starting
     try:
@@ -4613,30 +4643,32 @@ async def run_bot_main_loop():
 
         # Check if it's a Conflict error (multiple bot instances)
         if isinstance(context.error, telegram.error.Conflict):
-            logger.critical("Conflict error detected - Multiple bot instances running!")
-            logger.critical("This could be due to:")
-            logger.critical("1. Another bot instance running elsewhere")
-            logger.critical("2. Previous instance didn't shut down properly")
-            logger.critical("3. Webhook mode conflict with polling mode")
-            logger.critical("4. Bot token being used by another application")
-
-            # For Conflict errors, we need to stop polling immediately
-            # The error will cause the application to restart via Render's policy
-            logger.critical("Stopping polling due to conflict - Render will restart the service")
+            logger.critical("🚨 CONFLICT ERROR: Multiple bot instances detected!")
+            logger.critical("Telegram API Error: 'terminated by other getUpdates request'")
+            logger.critical("This means another bot instance is polling the same token")
+            
+            # Try to resolve the conflict automatically
+            logger.info("🔧 Attempting automatic conflict resolution...")
             try:
-                # Stop the application immediately
+                # Clear webhooks and wait
+                await resolve_bot_instance_conflict()
+                
+                # Wait longer before restart
+                logger.info("⏳ Waiting 30 seconds before restart to avoid rapid conflicts...")
+                await asyncio.sleep(30)
+                
+                # Stop the current application
                 if hasattr(application, 'stop'):
-                    asyncio.create_task(application.stop())
-                logger.critical("Application stop initiated...")
-
-                # Trigger graceful shutdown
-                await graceful_shutdown()
-
-            except Exception as shutdown_error:
-                logger.critical(f"Error during shutdown: {shutdown_error}")
-
-            # Re-raise the exception to trigger Render's restart policy
-            raise context.error
+                    await application.stop()
+                
+                logger.critical("🔄 Conflict resolved - triggering clean restart")
+                
+            except Exception as resolution_error:
+                logger.critical(f"❌ Conflict resolution failed: {resolution_error}")
+            
+            # Exit cleanly to trigger Render's restart policy
+            logger.critical("🔄 Exiting for clean restart - Render will restart the service")
+            return  # Exit gracefully instead of raising
 
         # Check for NetworkError (connection issues)
         if isinstance(context.error, telegram.error.NetworkError):
@@ -5066,39 +5098,32 @@ async def run_bot_main_loop():
             # Use polling (fallback or default)
             logger.info("🔄 Starting polling mode")
             
-            # Start polling with proper async handling
-            updater = application.updater
-            await updater.start_polling(
-                allowed_updates=Update.ALL_TYPES,
-                drop_pending_updates=True,
-                timeout=30,
-                read_timeout=30,
-                write_timeout=30,
-                connect_timeout=30,
-                pool_timeout=30
-            )
+            # Ensure webhook is deleted before starting polling
+            try:
+                await application.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Webhook deleted before polling")
+            except Exception as webhook_del_error:
+                logger.warning(f"⚠️ Could not delete webhook: {webhook_del_error}")
             
-            # Keep the bot running with infinite loop
+            # Start polling with proper async handling (modern python-telegram-bot)
             try:
                 logger.info("✅ Bot polling started successfully - listening for messages...")
-                # Keep the bot alive with infinite loop
-                while True:
-                    await asyncio.sleep(60)  # Check every minute
-                    
-                    # Monitor resources every 5 minutes
-                    if int(datetime.now(timezone.utc).timestamp()) % 300 == 0:
-                        if resource_monitor.check_memory_usage():
-                            logger.warning("🔄 Memory threshold exceeded - triggering restart")
-                            # Exit to trigger Render restart
-                            return
-                    
-                    logger.debug("Polling mode active - bot ready")
-            finally:
-                # Cleanup
-                logger.info("🛑 Stopping polling mode...")
-                await updater.stop()
-                await application.stop()
-                await application.shutdown()
+                
+                # Use run_polling which handles the event loop properly
+                await application.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    timeout=30,
+                    read_timeout=30,
+                    write_timeout=30,
+                    connect_timeout=30,
+                    pool_timeout=30,
+                    stop_signals=None  # Disable signal handlers to avoid threading issues
+                )
+                
+            except Exception as polling_error:
+                logger.error(f"❌ Polling error: {polling_error}")
+                raise
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Don't re-raise the exception to avoid triggering Render's restart policy
@@ -5111,7 +5136,6 @@ def main():
     
     try:
         import asyncio
-        import threading
         
         # Always create a new event loop for maximum compatibility
         logger.info("🔧 Creating new event loop for bot")
@@ -5127,15 +5151,13 @@ def main():
         
         # Run the bot
         logger.info("▶️ Starting bot main loop")
-        loop.run_until_complete(run_bot_main_loop())
+        asyncio.run(run_bot_main_loop())
         logger.info("✅ Bot shutdown gracefully")
     except KeyboardInterrupt:
         logger.info("🛑 Bot stopped by user")
-        # Run graceful shutdown in the event loop
+        # Run graceful shutdown
         try:
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed():
-                loop.run_until_complete(graceful_shutdown())
+            asyncio.run(graceful_shutdown())
         except Exception as shutdown_error:
             logger.error(f"Error during graceful shutdown: {shutdown_error}")
             # Fallback cleanup
@@ -5146,7 +5168,8 @@ def main():
                 pass
     except Exception as e:
         logger.critical(f"💥 Bot crashed: {e}")
-        raise
+        # Don't re-raise to avoid restart loops
+        logger.critical("Bot will restart via Render's restart policy")
     finally:
         # Cleanup
         try:
