@@ -259,14 +259,71 @@ def create_engine_with_fallback(database_url, pool_size, max_overflow):
     
     return None
 
-# Create engine with fallback strategies
-engine = create_engine_with_fallback(DATABASE_URL, pool_size, max_overflow)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Create engine with fallback strategies (non-blocking approach)
+engine = None
+SessionLocal = None
+
+def initialize_database():
+    """Initialize database connection with graceful failure handling"""
+    global engine, SessionLocal
+    
+    try:
+        logger.info("🔄 Initializing database connection...")
+        engine = create_engine_with_fallback(DATABASE_URL, pool_size, max_overflow)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        logger.info("✅ Database connection initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed: {e}")
+        logger.warning("⚠️ Starting without database connection - will retry later")
+        
+        # Create a dummy SessionLocal that raises an error when used
+        def dummy_session():
+            raise Exception("Database not available - connection failed at startup")
+        
+        SessionLocal = dummy_session
+        return False
+
+# Try to initialize database, but don't fail if it doesn't work
+database_available = initialize_database()
 
 # Import models directly (with --chdir, the root directory is in Python path)
 from models import UptimePing, create_tables
 import models
-models.SessionLocal = SessionLocal
+if SessionLocal:
+    models.SessionLocal = SessionLocal
+
+# Database retry mechanism
+def retry_database_connection():
+    """Retry database connection periodically"""
+    global engine, SessionLocal, database_available
+    
+    if database_available:
+        return True  # Already connected
+    
+    try:
+        logger.info("🔄 Retrying database connection...")
+        engine = create_engine_with_fallback(DATABASE_URL, pool_size, max_overflow)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        models.SessionLocal = SessionLocal
+        
+        # Test the connection
+        if test_database_connection():
+            database_available = True
+            logger.info("✅ Database reconnection successful!")
+            
+            # Try to create tables
+            tables_created = create_tables_with_retry(engine)
+            if tables_created:
+                logger.info("✅ Database tables created after reconnection")
+            
+            return True
+        else:
+            raise Exception("Connection test failed after engine creation")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Database reconnection failed: {e}")
+        return False
 
 # Create all tables using the centralized function with retry logic
 def create_tables_with_retry(engine, max_retries=5):
@@ -289,10 +346,13 @@ def create_tables_with_retry(engine, max_retries=5):
     
     return False
 
-# Try to create tables, but don't fail if it doesn't work
-tables_created = create_tables_with_retry(engine)
-if not tables_created:
-    logger.warning("⚠️ Tables creation failed - bot will attempt to create them on first use")
+# Try to create tables only if database is available
+if database_available and engine:
+    tables_created = create_tables_with_retry(engine)
+    if not tables_created:
+        logger.warning("⚠️ Tables creation failed - bot will attempt to create them on first use")
+else:
+    logger.warning("⚠️ Skipping table creation - database not available")
 
 # Test database connection with SSL
 def test_database_connection():
@@ -316,10 +376,13 @@ def test_database_connection():
             time.sleep(2 ** attempt)  # Exponential backoff
     return False
 
-# Test connection at startup
-if not test_database_connection():
-    logger.error("Critical: Database connection failed at startup")
-    # Don't exit, let the app try to recover
+# Test connection at startup only if database was initialized
+if database_available:
+    if not test_database_connection():
+        logger.error("Critical: Database connection test failed")
+        database_available = False
+else:
+    logger.warning("⚠️ Skipping database connection test - database not initialized")
 
 # Flask app for health checks (always create for Gunicorn compatibility)
 try:
@@ -341,45 +404,35 @@ if app:
             db_status = "disconnected"
             connection_strategy = "unknown"
             
-            # Try primary connection first
-            try:
-                session = SessionLocal()
-                from sqlalchemy import text
-                result = session.execute(text("SELECT 1"))
-                result.fetchone()
-                session.commit()
-                db_status = "connected"
-                connection_strategy = "primary"
-            except Exception as db_e:
-                logger.warning(f"Primary health check failed: {db_e}")
-                
-                # If primary fails, try to reconnect with fallback engine
+            # Check if database is available
+            if not database_available or not SessionLocal:
+                # Try to reconnect
+                if retry_database_connection():
+                    db_status = "reconnected"
+                    connection_strategy = "retry_success"
+                else:
+                    db_status = "unavailable"
+                    connection_strategy = "no_connection"
+            else:
+                # Try primary connection
                 try:
-                    if session:
-                        session.close()
+                    session = SessionLocal()
+                    from sqlalchemy import text
+                    result = session.execute(text("SELECT 1"))
+                    result.fetchone()
+                    session.commit()
+                    db_status = "connected"
+                    connection_strategy = "primary"
+                except Exception as db_e:
+                    logger.warning(f"Primary health check failed: {db_e}")
                     
-                    # Create a new engine with fallback strategies
-                    logger.info("🔄 Attempting health check with fallback connection")
-                    fallback_engine = create_engine_with_fallback(DATABASE_URL, 1, 0)
-                    
-                    if fallback_engine:
-                        from sqlalchemy.orm import sessionmaker
-                        FallbackSession = sessionmaker(bind=fallback_engine)
-                        session = FallbackSession()
-                        result = session.execute(text("SELECT 1"))
-                        result.fetchone()
-                        session.commit()
-                        db_status = "connected_fallback"
-                        connection_strategy = "fallback"
-                        logger.info("✅ Health check successful with fallback connection")
+                    # Try to reconnect
+                    if retry_database_connection():
+                        db_status = "reconnected"
+                        connection_strategy = "retry_success"
                     else:
-                        db_status = f"fallback_failed: {str(db_e)[:50]}"
+                        db_status = f"failed: {str(db_e)[:50]}"
                         connection_strategy = "failed"
-                        
-                except Exception as fallback_e:
-                    logger.error(f"Fallback health check also failed: {fallback_e}")
-                    db_status = f"all_failed: {str(fallback_e)[:30]}"
-                    connection_strategy = "all_failed"
             finally:
                 if session:
                     try:
@@ -408,19 +461,36 @@ if app:
                 pass
 
             # Determine overall health status
-            is_healthy = db_status in ['connected', 'connected_fallback']
-            status_code = 200 if is_healthy else 503
+            is_healthy = db_status in ['connected', 'connected_fallback', 'reconnected']
+            is_degraded = db_status in ['unavailable', 'failed']
+            
+            if is_healthy:
+                status_code = 200
+            elif is_degraded:
+                status_code = 503  # Service unavailable but trying to recover
+            else:
+                status_code = 503
             
             from datetime import datetime, timezone
+            
+            # Determine service status
+            if is_healthy:
+                service_status = 'healthy'
+            elif is_degraded:
+                service_status = 'degraded'
+            else:
+                service_status = 'unhealthy'
+            
             return jsonify({
-                'status': 'healthy' if is_healthy else 'degraded',
+                'status': service_status,
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'database': db_status,
                 'connection_strategy': connection_strategy,
                 'bot_status': bot_status,
+                'database_available': database_available,
                 'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400,
                 'resources': resource_status,
-                'ssl_info': 'SSL connection with fallback strategies'
+                'ssl_info': 'Graceful degradation - service runs without database if needed'
             }), status_code
         except Exception as e:
             logger.error(f"Health check failed: {e}")
@@ -616,24 +686,25 @@ if __name__ != '__main__':
                             # Log success with comprehensive details
                             logger.info(f"✅ Ping '{thread_name}' successful - Response: {response_time}ms - Status: {response.status_code}")
 
-                            # Record success in database
-                            try:
-                                session = SessionLocal()
-                                ping_record = UptimePing(
-                                    thread_name=thread_name,
-                                    endpoint='/health',
-                                    success=True,
-                                    response_time_ms=response_time
-                                )
-                                session.add(ping_record)
-                                session.commit()
-                            except Exception as db_e:
-                                logger.warning(f"⚠️ Failed to record ping success in database: {db_e}")
-                            finally:
+                            # Record success in database (if available)
+                            if database_available and SessionLocal:
                                 try:
-                                    session.close()
-                                except Exception:
-                                    pass
+                                    session = SessionLocal()
+                                    ping_record = UptimePing(
+                                        thread_name=thread_name,
+                                        endpoint='/health',
+                                        success=True,
+                                        response_time_ms=response_time
+                                    )
+                                    session.add(ping_record)
+                                    session.commit()
+                                except Exception as db_e:
+                                    logger.warning(f"⚠️ Failed to record ping success in database: {db_e}")
+                                finally:
+                                    try:
+                                        session.close()
+                                    except Exception:
+                                        pass
                         else:
                             consecutive_failures += 1
                             ping_circuit_breaker.record_failure(thread_name)
@@ -641,25 +712,26 @@ if __name__ != '__main__':
                             # Log failure with details
                             logger.warning(f"⚠️ Ping '{thread_name}' failed - Status: {response.status_code} - Response: {response_time}ms - Consecutive: {consecutive_failures}")
 
-                            # Record failure in database
-                            try:
-                                session = SessionLocal()
-                                ping_record = UptimePing(
-                                    thread_name=thread_name,
-                                    endpoint='/health',
-                                    success=False,
-                                    response_time_ms=response_time,
-                                    error_message=f"HTTP {response.status_code}"
-                                )
-                                session.add(ping_record)
-                                session.commit()
-                            except Exception as db_e:
-                                logger.warning(f"⚠️ Failed to record ping failure in database: {db_e}")
-                            finally:
+                            # Record failure in database (if available)
+                            if database_available and SessionLocal:
                                 try:
-                                    session.close()
-                                except Exception:
-                                    pass
+                                    session = SessionLocal()
+                                    ping_record = UptimePing(
+                                        thread_name=thread_name,
+                                        endpoint='/health',
+                                        success=False,
+                                        response_time_ms=response_time,
+                                        error_message=f"HTTP {response.status_code}"
+                                    )
+                                    session.add(ping_record)
+                                    session.commit()
+                                except Exception as db_e:
+                                    logger.warning(f"⚠️ Failed to record ping failure in database: {db_e}")
+                                finally:
+                                    try:
+                                        session.close()
+                                    except Exception:
+                                        pass
 
                     except requests.exceptions.Timeout:
                         consecutive_failures += 1
@@ -668,25 +740,26 @@ if __name__ != '__main__':
 
                         logger.error(f"⏰ Ping '{thread_name}' timeout - Response: {response_time}ms - Consecutive: {consecutive_failures}")
 
-                        # Record timeout in database
-                        try:
-                            session = SessionLocal()
-                            ping_record = UptimePing(
-                                thread_name=thread_name,
-                                endpoint='/health',
-                                success=False,
-                                response_time_ms=response_time,
-                                error_message="Timeout"
-                            )
-                            session.add(ping_record)
-                            session.commit()
-                        except Exception as db_e:
-                            logger.warning(f"⚠️ Failed to record ping timeout in database: {db_e}")
-                        finally:
+                        # Record timeout in database (if available)
+                        if database_available and SessionLocal:
                             try:
-                                session.close()
-                            except Exception:
-                                pass
+                                session = SessionLocal()
+                                ping_record = UptimePing(
+                                    thread_name=thread_name,
+                                    endpoint='/health',
+                                    success=False,
+                                    response_time_ms=response_time,
+                                    error_message="Timeout"
+                                )
+                                session.add(ping_record)
+                                session.commit()
+                            except Exception as db_e:
+                                logger.warning(f"⚠️ Failed to record ping timeout in database: {db_e}")
+                            finally:
+                                try:
+                                    session.close()
+                                except Exception:
+                                    pass
 
                     except Exception as e:
                         consecutive_failures += 1
@@ -695,25 +768,26 @@ if __name__ != '__main__':
 
                         logger.error(f"💥 Ping '{thread_name}' error: {str(e)} - Response: {response_time}ms - Consecutive: {consecutive_failures}")
 
-                        # Record error in database
-                        try:
-                            session = SessionLocal()
-                            ping_record = UptimePing(
-                                thread_name=thread_name,
-                                endpoint='/health',
-                                success=False,
-                                response_time_ms=response_time,
-                                error_message=str(e)
-                            )
-                            session.add(ping_record)
-                            session.commit()
-                        except Exception as db_e:
-                            logger.warning(f"⚠️ Failed to record ping error in database: {db_e}")
-                        finally:
+                        # Record error in database (if available)
+                        if database_available and SessionLocal:
                             try:
-                                session.close()
-                            except Exception:
-                                pass
+                                session = SessionLocal()
+                                ping_record = UptimePing(
+                                    thread_name=thread_name,
+                                    endpoint='/health',
+                                    success=False,
+                                    response_time_ms=response_time,
+                                    error_message=str(e)
+                                )
+                                session.add(ping_record)
+                                session.commit()
+                            except Exception as db_e:
+                                logger.warning(f"⚠️ Failed to record ping error in database: {db_e}")
+                            finally:
+                                try:
+                                    session.close()
+                                except Exception:
+                                    pass
 
                     # Check if thread should restart due to circuit breaker
                     if ping_circuit_breaker.should_restart(thread_name):
