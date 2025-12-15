@@ -109,10 +109,24 @@ pool_size = int(os.getenv('DATABASE_POOL_SIZE', '3'))  # Ridotto per risparmiare
 max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '2'))  # Ridotto per efficienza
 
 def create_engine_with_fallback(database_url, pool_size, max_overflow):
-    """Create engine with direct URL manipulation for Render PostgreSQL"""
+    """Create engine with SQLite fallback for immediate functionality"""
     
-    # ULTRA-DIRECT APPROACH: Manually create URLs with different SSL modes
-    # This bypasses all URL parsing issues and directly tests what works
+    # IMMEDIATE SOLUTION: Try PostgreSQL first, fallback to SQLite if it fails
+    logger.info("🔄 Attempting database connection with fallback to SQLite...")
+    
+    # Check if we should use SQLite directly
+    if os.getenv('USE_SQLITE') == 'true':
+        logger.info("🔧 Using SQLite database (USE_SQLITE=true)")
+        sqlite_url = "sqlite:///./erixcast.db"
+        return create_engine(
+            sqlite_url,
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=10,
+            pool_recycle=300,
+            pool_pre_ping=False,
+            echo=False
+        )
     
     from urllib.parse import urlparse, urlunparse
     parsed = urlparse(database_url)
@@ -229,33 +243,37 @@ def create_engine_with_fallback(database_url, pool_size, max_overflow):
             logger.warning(f"❌ Strategy {i+1} '{config['name']}' failed: {str(e)[:100]}...")
             continue  # Try next strategy immediately
     
-    # If we get here, all strategies failed
-    logger.error("💥 All connection strategies failed!")
-    logger.error("🔍 Attempting final diagnostic connection...")
+    # If we get here, all PostgreSQL strategies failed
+    logger.error("💥 All PostgreSQL connection strategies failed!")
+    logger.warning("🔄 Falling back to SQLite for immediate functionality...")
     
-    # Final diagnostic attempt with minimal configuration
+    # AUTOMATIC FALLBACK TO SQLITE
     try:
-        diagnostic_engine = create_engine(
-            base_url,  # Completely bare URL
+        logger.info("🔧 Creating SQLite fallback database...")
+        sqlite_url = "sqlite:///./erixcast.db"
+        sqlite_engine = create_engine(
+            sqlite_url,
             pool_size=1,
             max_overflow=0,
-            pool_timeout=5,
-            pool_recycle=30,
+            pool_timeout=10,
+            pool_recycle=300,
             pool_pre_ping=False,
-            echo=True  # Enable echo for debugging
+            echo=False
         )
         
-        with diagnostic_engine.connect() as conn:
+        # Test SQLite connection
+        with sqlite_engine.connect() as conn:
             from sqlalchemy import text
             result = conn.execute(text("SELECT 1"))
             result.fetchone()
-            logger.warning("⚠️ Diagnostic connection successful with bare URL")
-            return diagnostic_engine
+            logger.warning("⚠️ SQLite fallback successful - bot will work with local database")
+            logger.warning("📝 Note: SQLite data will be lost on redeploy - consider external database")
+            return sqlite_engine
             
-    except Exception as diagnostic_e:
-        logger.error(f"💀 Diagnostic connection also failed: {diagnostic_e}")
-        logger.error("🚨 DATABASE COMPLETELY UNAVAILABLE - Check Render PostgreSQL status")
-        raise Exception(f"All database connection attempts failed. Last diagnostic error: {diagnostic_e}")
+    except Exception as sqlite_e:
+        logger.error(f"💀 SQLite fallback also failed: {sqlite_e}")
+        logger.error("🚨 NO DATABASE AVAILABLE - Bot will run in memory-only mode")
+        raise Exception(f"All database connection attempts failed. SQLite error: {sqlite_e}")
     
     return None
 
@@ -349,6 +367,11 @@ if database_available and engine:
     tables_created = create_tables_with_retry(engine)
     if not tables_created:
         logger.warning("⚠️ Tables creation failed - bot will attempt to create them on first use")
+    
+    # Check if we're using SQLite and inform user
+    if 'sqlite' in str(engine.url):
+        logger.warning("📝 Using SQLite database - data will be lost on redeploy")
+        logger.info("💡 For persistent data, consider using Supabase or Neon (free external databases)")
 else:
     logger.warning("⚠️ Skipping table creation - database not available")
 
