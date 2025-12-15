@@ -8,7 +8,50 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 import pytz
-from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
+from models import SessionLocal
+
+def get_database_session():
+    """Helper function to get database session with availability check"""
+    if not SessionLocal or not callable(SessionLocal):
+        logger.warning("⚠️ Database not available - SessionLocal is None or not callable")
+        return None
+    
+    try:
+        return SessionLocal()
+    except Exception as e:
+        logger.error(f"❌ Failed to create database session: {e}")
+        return None
+
+def database_operation(func):
+    """Decorator to handle database operations gracefully"""
+    async def wrapper(*args, **kwargs):
+        session = get_database_session()
+        if session is None:
+            # Handle the case where database is not available
+            if len(args) > 0 and hasattr(args[0], 'callback_query'):
+                # This is likely a callback query
+                query = args[0].callback_query
+                await query.edit_message_text("⚠️ Database temporaneamente non disponibile. Riprova più tardi.")
+                return
+            elif len(args) > 0 and hasattr(args[0], 'message'):
+                # This is likely an update with message
+                update = args[0]
+                await update.message.reply_text("⚠️ Database temporaneamente non disponibile. Riprova più tardi.")
+                return
+            else:
+                logger.warning("Database not available for operation")
+                return
+        
+        try:
+            return await func(*args, session=session, **kwargs)
+        except Exception as e:
+            logger.error(f"Database operation failed: {e}")
+            session.rollback()
+            raise
+        finally:
+            session.close()
+    
+    return wrapper, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
 from utils.validation import sanitize_text
 from utils.rate_limiting import rate_limiter
 from utils.metrics import metrics_collector
@@ -1021,6 +1064,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     user_id = query.from_user.id
+    
+    # Debug logging
+    logger.info(f"Button handler called with data: {data} by user: {user_id}")
+    
+    # Check if SessionLocal is available
+    if not SessionLocal:
+        logger.error("SessionLocal is None - database not initialized")
+        await query.edit_message_text("⚠️ Database non disponibile. Il bot si sta avviando, riprova tra qualche secondo.")
+        return
 
     if data == 'admin_panel':
         if not is_admin(user_id):
@@ -1059,6 +1111,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(localization.get_text('ticket.menu_title', user_lang), reply_markup=reply_markup)
 
     elif data == 'user_stats':
+        # Check if database is available
+        if not SessionLocal or not callable(SessionLocal):
+            await query.edit_message_text("⚠️ Database non disponibile al momento. Riprova più tardi.")
+            return
+            
         session = SessionLocal()
         try:
             # Log accesso statistiche
