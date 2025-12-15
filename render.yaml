@@ -25,26 +25,26 @@ services:
       - key: ADMIN_IDS
         fromSecret: admin_ids
       - key: PORT
-        value: 10000
+        value: "10000"
       - key: WEBHOOK_URL
         fromSecret: webhook_url
       - key: RENDER_URL
         fromSecret: render_url
       - key: STARTUP_DELAY
-        value: 30
+        value: "30"
       - key: PYTHONUNBUFFERED
-        value: 1
+        value: "1"
       - key: LOG_LEVEL
-        value: INFO
+        value: "INFO"
       - key: DATABASE_POOL_SIZE
-        value: 3
+        value: "3"
       - key: DATABASE_MAX_OVERFLOW
-        value: 2
+        value: "2"
       # Abilita webhook per efficienza massima (no polling)
       - key: USE_WEBHOOK
-        value: true
+        value: "true"
       # SQLite autonomo - nessuna configurazione SSL necessaria
       - key: AUTONOMOUS_MODE
-        value: true
+        value: "true"
       - key: SQLITE_PERSISTENT
-        value: true
+        value: "true"
