@@ -40,8 +40,11 @@ services:
       # Abilita webhook per efficienza massima (no polling)
       - key: USE_WEBHOOK
         value: true
-      # SSL configuration for PostgreSQL
+      # SSL configuration for PostgreSQL (flexible for stability)
       - key: PGSSLMODE
-        value: require
+        value: allow
       - key: RENDER
         value: true
+      # Render-specific optimizations
+      - key: PGCONNECT_TIMEOUT
+        value: 30

@@ -74,12 +74,33 @@ def clean_database_url(database_url):
 # Apply Render SSL fixes if on Render
 if os.getenv('RENDER'):
     try:
-        from render_ssl_fix import fix_render_database_url, set_ssl_environment
-        set_ssl_environment()
-        fixed_url = fix_render_database_url()
-        if fixed_url:
-            os.environ['DATABASE_URL'] = fixed_url
-            logger.info("Applied Render SSL fixes")
+        # First, try the aggressive connection test to find what works
+        logger.info("🔍 Running aggressive connection test for Render PostgreSQL")
+        try:
+            import subprocess
+            import sys
+            result = subprocess.run([sys.executable, 'test_render_connection.py'], 
+                                  capture_output=True, text=True, timeout=60)
+            if result.returncode == 0:
+                logger.info("✅ Connection test successful - optimal URL set")
+            else:
+                logger.warning(f"⚠️ Connection test failed: {result.stderr}")
+                # Fall back to render_ssl_fix
+                from render_ssl_fix import fix_render_database_url, set_ssl_environment
+                set_ssl_environment()
+                fixed_url = fix_render_database_url()
+                if fixed_url:
+                    os.environ['DATABASE_URL'] = fixed_url
+                    logger.info("Applied fallback Render SSL fixes")
+        except Exception as test_e:
+            logger.warning(f"Connection test failed: {test_e}")
+            # Fall back to render_ssl_fix
+            from render_ssl_fix import fix_render_database_url, set_ssl_environment
+            set_ssl_environment()
+            fixed_url = fix_render_database_url()
+            if fixed_url:
+                os.environ['DATABASE_URL'] = fixed_url
+                logger.info("Applied fallback Render SSL fixes")
     except ImportError:
         logger.warning("Render SSL fix module not available")
     except Exception as e:
@@ -104,80 +125,84 @@ pool_size = int(os.getenv('DATABASE_POOL_SIZE', '3'))  # Ridotto per risparmiare
 max_overflow = int(os.getenv('DATABASE_MAX_OVERFLOW', '2'))  # Ridotto per efficienza
 
 def create_engine_with_fallback(database_url, pool_size, max_overflow):
-    """Create engine with SSL fallback strategies optimized for Render"""
+    """Create engine with aggressive SSL workarounds for Render PostgreSQL"""
     
-    # Enhanced SSL strategies specifically for Render PostgreSQL
+    # RADICAL APPROACH: Start with the most stable configurations first
+    # Based on Render PostgreSQL SSL instability, prioritize non-SSL and minimal SSL
     ssl_configs = [
-        # Strategy 1: Render-optimized SSL with aggressive keepalives
+        # Strategy 1: NO SSL - Most stable for Render (try first)
         {
-            'name': 'Render SSL optimized',
-            'connect_args': {
-                'connect_timeout': 45,  # Longer timeout for SSL handshake
-                'sslmode': 'require',
-                'keepalives': 1,
-                'keepalives_idle': 300,    # 5 minutes (shorter for Render)
-                'keepalives_interval': 15,  # 15 seconds (more frequent)
-                'keepalives_count': 5,     # More attempts
-                'tcp_user_timeout': 30000, # 30 seconds (shorter)
-                'application_name': 'ErixCastBot-Render'
-            },
-            'pool_recycle': 1800,  # 30 minutes (shorter for SSL stability)
-            'pool_pre_ping': True,
-            'pool_timeout': 45
-        },
-        # Strategy 2: Minimal SSL with short timeouts
-        {
-            'name': 'Minimal SSL fast',
-            'connect_args': {
-                'connect_timeout': 20,
-                'sslmode': 'require',
-                'application_name': 'ErixCastBot-Fast'
-            },
-            'pool_recycle': 900,   # 15 minutes
-            'pool_pre_ping': False, # Disable pre-ping to avoid SSL issues
-            'pool_timeout': 20
-        },
-        # Strategy 3: SSL prefer with connection pooling disabled
-        {
-            'name': 'SSL prefer no-pool',
+            'name': 'No SSL (most stable)',
             'connect_args': {
                 'connect_timeout': 15,
-                'sslmode': 'prefer',
-                'application_name': 'ErixCastBot-NoPool'
+                'sslmode': 'disable',
+                'application_name': 'ErixCastBot-NoSSL'
             },
             'pool_recycle': 300,   # 5 minutes
             'pool_pre_ping': False,
             'pool_timeout': 15,
-            'pool_size': 1,        # Single connection
+            'pool_size': 1,        # Single connection for stability
             'max_overflow': 0
         },
-        # Strategy 4: SSL allow with minimal configuration
+        # Strategy 2: SSL Allow (fallback to non-SSL if needed)
         {
-            'name': 'SSL allow minimal',
+            'name': 'SSL allow (flexible)',
             'connect_args': {
-                'connect_timeout': 10,
+                'connect_timeout': 20,
                 'sslmode': 'allow',
-                'application_name': 'ErixCastBot-Minimal'
+                'application_name': 'ErixCastBot-Flexible'
             },
-            'pool_recycle': 180,   # 3 minutes
+            'pool_recycle': 600,   # 10 minutes
             'pool_pre_ping': False,
-            'pool_timeout': 10,
+            'pool_timeout': 20,
             'pool_size': 1,
             'max_overflow': 0
         },
-        # Strategy 5: Disable SSL as last resort
+        # Strategy 3: SSL Prefer (try SSL but allow fallback)
         {
-            'name': 'No SSL (last resort)',
+            'name': 'SSL prefer (fallback)',
             'connect_args': {
-                'connect_timeout': 10,
-                'sslmode': 'disable',
-                'application_name': 'ErixCastBot-NoSSL'
+                'connect_timeout': 25,
+                'sslmode': 'prefer',
+                'application_name': 'ErixCastBot-Prefer'
             },
-            'pool_recycle': 120,   # 2 minutes
+            'pool_recycle': 900,   # 15 minutes
             'pool_pre_ping': False,
-            'pool_timeout': 10,
-            'pool_size': 1,
+            'pool_timeout': 25,
+            'pool_size': 2,
             'max_overflow': 0
+        },
+        # Strategy 4: Minimal SSL Required (if SSL is mandatory)
+        {
+            'name': 'Minimal SSL required',
+            'connect_args': {
+                'connect_timeout': 30,
+                'sslmode': 'require',
+                'application_name': 'ErixCastBot-MinSSL'
+            },
+            'pool_recycle': 1200,  # 20 minutes
+            'pool_pre_ping': False,
+            'pool_timeout': 30,
+            'pool_size': 2,
+            'max_overflow': 1
+        },
+        # Strategy 5: Full SSL (last resort - most likely to fail)
+        {
+            'name': 'Full SSL (last resort)',
+            'connect_args': {
+                'connect_timeout': 45,
+                'sslmode': 'require',
+                'keepalives': 1,
+                'keepalives_idle': 600,
+                'keepalives_interval': 30,
+                'keepalives_count': 3,
+                'application_name': 'ErixCastBot-FullSSL'
+            },
+            'pool_recycle': 1800,  # 30 minutes
+            'pool_pre_ping': True,
+            'pool_timeout': 45,
+            'pool_size': 3,
+            'max_overflow': 2
         }
     ]
     

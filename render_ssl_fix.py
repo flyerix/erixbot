@@ -31,10 +31,10 @@ def fix_render_database_url():
             if param in query_params:
                 del query_params[param]
         
-        # Add only essential SSL parameters
+        # Add flexible SSL parameters (allow non-SSL for stability)
         essential_ssl_params = {
-            'sslmode': ['require'],
-            'connect_timeout': ['45'],  # Longer timeout for SSL handshake
+            'sslmode': ['allow'],  # Changed from 'require' to 'allow' for stability
+            'connect_timeout': ['30'],  # Reasonable timeout
             'application_name': ['ErixCastBot']
         }
         
@@ -53,8 +53,8 @@ def fix_render_database_url():
             parsed.fragment
         ))
         
-        logger.info("✅ Applied Render SSL fix with minimal parameters")
-        logger.info(f"🔧 SSL mode: require, timeout: 45s")
+        logger.info("✅ Applied Render SSL fix with flexible parameters")
+        logger.info("🔧 SSL mode: allow (flexible), timeout: 30s")
         return fixed_url
         
     except Exception as e:
@@ -125,8 +125,8 @@ def set_ssl_environment():
     # Only set essential SSL environment variables
     # Avoid setting empty cert paths that might cause issues
     ssl_env_vars = {
-        'PGSSLMODE': 'require',
-        'PGCONNECT_TIMEOUT': '45',  # Longer timeout for SSL
+        'PGSSLMODE': 'allow',  # Changed from 'require' to 'allow' for stability
+        'PGCONNECT_TIMEOUT': '30',  # Reasonable timeout
         'PGAPPNAME': 'ErixCastBot'
     }
     
