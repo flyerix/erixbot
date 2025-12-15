@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from datetime import datetime, timedelta, timezone
 import pytz
-from models import SessionLocal
+from models import SessionLocal, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
 
 def get_database_session():
     """Helper function to get database session with availability check"""
@@ -51,7 +51,7 @@ def database_operation(func):
         finally:
             session.close()
     
-    return wrapper, List, Ticket, TicketMessage, UserNotification, RenewalRequest, UserActivity, AuditLog
+    return wrapper
 from utils.validation import sanitize_text
 from utils.rate_limiting import rate_limiter
 from utils.metrics import metrics_collector
@@ -4250,7 +4250,7 @@ async def run_bot_main_loop():
                         await asyncio.sleep(60)  # Check every minute
             
                         # Monitor resources every 5 minutes
-                        if int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 300 == 0:
+                        if int(datetime.now(timezone.utc).timestamp()) % 300 == 0:
                             if resource_monitor.check_memory_usage():
                                 logger.warning("🔄 Memory threshold exceeded - triggering restart")
                                 # Exit to trigger Render restart
@@ -4297,7 +4297,7 @@ async def run_bot_main_loop():
                     await asyncio.sleep(60)  # Check every minute
                     
                     # Monitor resources every 5 minutes
-                    if int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 300 == 0:
+                    if int(datetime.now(timezone.utc).timestamp()) % 300 == 0:
                         if resource_monitor.check_memory_usage():
                             logger.warning("🔄 Memory threshold exceeded - triggering restart")
                             # Exit to trigger Render restart
