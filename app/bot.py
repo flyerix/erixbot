@@ -5187,98 +5187,65 @@ async def run_bot_main_loop():
                 raise
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
+        # Proper cleanup before returning
+        try:
+            # Stop the application properly if it exists
+            if 'application' in locals() and application:
+                # Don't await here as we're not in async context
+                logger.info("🛑 Stopping application...")
+        except Exception as cleanup_e:
+            logger.error(f"Error during cleanup: {cleanup_e}")
+        
         # Don't re-raise the exception to avoid triggering Render's restart policy
         # Instead, let the retry mechanism handle it
         return
 
 def main():
-    """Main bot function with enhanced stability and auto-restart"""
-    logger.info("🚀 Starting ErixCast bot with enhanced stability...")
+    """Simplified main function to avoid event loop issues"""
+    logger.info("🚀 Starting ErixCast bot (simplified version)...")
     
-    max_restart_attempts = 10
-    restart_count = 0
-    base_delay = 30  # Base delay between restarts
+    import asyncio
+    import sys
     
-    while restart_count < max_restart_attempts:
+    # Simple approach - just run the bot once
+    try:
+        # Create fresh event loop
         try:
-            import asyncio
-            
-            # Always create a new event loop for maximum compatibility
-            logger.info(f"🔧 Creating new event loop for bot (attempt {restart_count + 1})")
-            
-            # Get or create event loop
+            # Close any existing loop
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    raise RuntimeError("Event loop is closed")
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Run the bot with timeout protection
-            logger.info("▶️ Starting bot main loop with stability monitoring")
-            
-            # Create a task with timeout
-            async def run_with_monitoring():
-                try:
-                    await run_bot_main_loop()
-                except Exception as e:
-                    logger.error(f"Bot main loop error: {e}")
-                    raise
-            
-            # Run with asyncio
-            asyncio.run(run_with_monitoring())
-            
-            logger.info("✅ Bot shutdown gracefully")
-            break  # Exit the restart loop if successful shutdown
-            
-        except KeyboardInterrupt:
-            logger.info("🛑 Bot stopped by user")
-            # Run graceful shutdown
-            try:
-                asyncio.run(graceful_shutdown())
-            except Exception as shutdown_error:
-                logger.error(f"Error during graceful shutdown: {shutdown_error}")
-            break  # Exit restart loop on user interrupt
-            
-        except Exception as e:
-            restart_count += 1
-            logger.error(f"💥 Bot crashed (attempt {restart_count}/{max_restart_attempts}): {e}")
-            
-            if restart_count >= max_restart_attempts:
-                logger.critical(f"❌ Max restart attempts reached ({max_restart_attempts})")
-                logger.critical("Bot will rely on external restart mechanism")
-                break
-            
-            # Calculate exponential backoff delay
-            delay = min(base_delay * (2 ** (restart_count - 1)), 300)  # Max 5 minutes
-            logger.info(f"🔄 Restarting bot in {delay} seconds... (attempt {restart_count + 1})")
-            
-            # Cleanup before restart
-            try:
-                remove_pid_file()
-                remove_lock_file()
+                old_loop = asyncio.get_event_loop()
+                if not old_loop.is_closed():
+                    old_loop.close()
             except:
                 pass
             
-            # Wait before restart
-            import time
-            time.sleep(delay)
+            # Create new loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             
-            logger.info(f"🔄 Attempting bot restart #{restart_count + 1}")
-    
-    # Final cleanup
-    try:
-        remove_pid_file()
-        remove_lock_file()
-    except:
-        pass
-    
-    if restart_count >= max_restart_attempts:
-        logger.critical("💥 Bot failed to start after multiple attempts")
+        except Exception as loop_e:
+            logger.warning(f"Event loop setup warning: {loop_e}")
+            # Fallback - use default loop
+            loop = asyncio.get_event_loop()
+        
+        logger.info("▶️ Starting bot main loop...")
+        loop.run_until_complete(run_bot_main_loop())
+        
+        logger.info("✅ Bot completed successfully")
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Bot error: {e}")
+        # Exit cleanly to let Render restart
         sys.exit(1)
-    else:
-        logger.info("✅ Bot main function completed")
+    finally:
+        # Cleanup
+        try:
+            remove_pid_file()
+            remove_lock_file()
+        except:
+            pass
 
 if __name__ == '__main__':
     main()

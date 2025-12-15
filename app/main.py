@@ -629,27 +629,33 @@ if __name__ != '__main__':
     bot_thread.start()
     logger.info("ErixCastBot started successfully in production mode")
     
-    # Avvia il watchdog per monitorare la stabilità del bot
-    def start_watchdog():
-        """Avvia il watchdog per monitorare il bot"""
-        try:
-            # Aspetta che il bot si avvii
-            import time
-            time.sleep(120)  # Aspetta 2 minuti
-            
-            # Importa e avvia il watchdog
-            from bot_watchdog import BotWatchdog
-            watchdog = BotWatchdog()
-            logger.info("🐕 Starting bot watchdog...")
-            watchdog.run_monitoring()
-            
-        except Exception as e:
-            logger.error(f"❌ Watchdog failed to start: {e}")
-    
-    # Avvia il watchdog in un thread separato
-    watchdog_thread = threading.Thread(target=start_watchdog, daemon=True)
-    watchdog_thread.start()
-    logger.info("🐕 Bot watchdog thread started")
+    # Avvia il watchdog per monitorare la stabilità del bot (solo se non in sviluppo)
+    if os.getenv('RENDER') == 'true':
+        def start_watchdog():
+            """Avvia il watchdog per monitorare il bot"""
+            try:
+                # Aspetta che il bot si avvii
+                import time
+                time.sleep(180)  # Aspetta 3 minuti per evitare conflitti
+                
+                # Importa e avvia il watchdog
+                try:
+                    from bot_watchdog import BotWatchdog
+                    watchdog = BotWatchdog()
+                    logger.info("🐕 Starting bot watchdog...")
+                    watchdog.run_monitoring()
+                except ImportError:
+                    logger.warning("⚠️ Watchdog module not available, skipping...")
+                
+            except Exception as e:
+                logger.error(f"❌ Watchdog failed to start: {e}")
+        
+        # Avvia il watchdog in un thread separato solo su Render
+        watchdog_thread = threading.Thread(target=start_watchdog, daemon=True)
+        watchdog_thread.start()
+        logger.info("🐕 Bot watchdog thread started (Render only)")
+    else:
+        logger.info("🐕 Watchdog disabled in development mode")
 
     # Start enhanced auto-ping system to prevent Render sleep
     if app is not None:
