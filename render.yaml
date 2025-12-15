@@ -40,3 +40,8 @@ services:
       # Abilita webhook per efficienza massima (no polling)
       - key: USE_WEBHOOK
         value: true
+      # SSL configuration for PostgreSQL
+      - key: PGSSLMODE
+        value: require
+      - key: RENDER
+        value: true

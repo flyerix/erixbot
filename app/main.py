@@ -37,8 +37,13 @@ def clean_database_url(database_url):
             'connect_timeout', 'sslmode', 'sslrootcert', 'sslcert', 'sslkey',
             'application_name', 'client_encoding', 'options', 'fallback_application_name',
             'keepalives', 'keepalives_idle', 'keepalives_interval', 'keepalives_count',
-            'tcp_user_timeout'
+            'tcp_user_timeout', 'sslcrl', 'requiressl', 'sslcompression'
         }
+        
+        # Force SSL mode for PostgreSQL connections if not specified
+        if 'postgresql' in database_url and 'sslmode' not in query_params:
+            cleaned_params['sslmode'] = ['require']
+            logger.info("Added sslmode=require to DATABASE_URL for PostgreSQL connection")
 
         # Filter out invalid parameters
         cleaned_params = {k: v for k, v in query_params.items() if k in valid_params}
@@ -67,6 +72,20 @@ def clean_database_url(database_url):
         logger.warning(f"Failed to clean DATABASE_URL: {e}. Using original URL.")
         return database_url
 
+# Apply Render SSL fixes if on Render
+if os.getenv('RENDER'):
+    try:
+        from render_ssl_fix import fix_render_database_url, set_ssl_environment
+        set_ssl_environment()
+        fixed_url = fix_render_database_url()
+        if fixed_url:
+            os.environ['DATABASE_URL'] = fixed_url
+            logger.info("Applied Render SSL fixes")
+    except ImportError:
+        logger.warning("Render SSL fix module not available")
+    except Exception as e:
+        logger.warning(f"Failed to apply Render SSL fixes: {e}")
+
 # Environment validation
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
@@ -90,13 +109,20 @@ engine = create_engine(
     poolclass=QueuePool,
     pool_size=pool_size,
     max_overflow=max_overflow,
-    pool_timeout=20,  # Ridotto per risposte più rapide
-    pool_recycle=900,  # Recycle ogni 15 minuti (più frequente per stabilità)
+    pool_timeout=30,  # Aumentato per gestire connessioni SSL lente
+    pool_recycle=3600,  # Recycle ogni ora per stabilità SSL
     pool_pre_ping=True,  # Verifica connessioni prima dell'uso
     echo=False,  # Disabilita logging SQL in produzione
-    # Valid psycopg2 connect_args only
+    # Enhanced connect_args for PostgreSQL SSL connections
     connect_args={
-        'connect_timeout': 10,
+        'connect_timeout': 30,  # Timeout più lungo per SSL
+        'sslmode': 'require',   # Forza SSL
+        'keepalives': 1,        # Abilita TCP keepalives
+        'keepalives_idle': 600, # Inizia keepalives dopo 10 minuti
+        'keepalives_interval': 30, # Intervallo keepalives 30 secondi
+        'keepalives_count': 3,  # Max 3 tentativi keepalive
+        'tcp_user_timeout': 60000,  # Timeout TCP 60 secondi
+        'application_name': 'ErixCastBot'  # Nome applicazione per debug
     } if 'postgresql' in DATABASE_URL else {}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -106,8 +132,50 @@ from models import List, Ticket, TicketMessage, UserNotification, RenewalRequest
 import models
 models.SessionLocal = SessionLocal
 
-# Create all tables using the centralized function
-create_tables(engine)
+# Create all tables using the centralized function with retry logic
+def create_tables_with_retry(engine, max_retries=3):
+    """Create tables with retry logic for connection issues"""
+    for attempt in range(max_retries):
+        try:
+            create_tables(engine)
+            logger.info("Database tables created successfully")
+            return
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1}/{max_retries} to create tables failed: {e}")
+            if attempt == max_retries - 1:
+                logger.error("Failed to create tables after all retries")
+                raise
+            import time
+            time.sleep(5)  # Wait 5 seconds before retry
+
+create_tables_with_retry(engine)
+
+# Test database connection with SSL
+def test_database_connection():
+    """Test database connection with proper error handling"""
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            session = SessionLocal()
+            from sqlalchemy import text
+            result = session.execute(text("SELECT version()"))
+            version = result.fetchone()[0]
+            session.close()
+            logger.info(f"Database connection successful - PostgreSQL version: {version[:50]}...")
+            return True
+        except Exception as e:
+            logger.warning(f"Database connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                logger.error("Database connection failed after all retries")
+                return False
+            import time
+            time.sleep(2 ** attempt)  # Exponential backoff
+    return False
+
+# Test connection at startup
+if not test_database_connection():
+    logger.error("Critical: Database connection failed at startup")
+    # Don't exit, let the app try to recover
 
 # Flask app for health checks (always create for Gunicorn compatibility)
 try:
@@ -124,12 +192,25 @@ if app:
     def health_check():
         """Aggressive health check to keep Render service alive"""
         try:
-            # Test database connection
-            session = SessionLocal()
-            from sqlalchemy import text
-            session.execute(text("SELECT 1"))
-            session.commit()
-            session.close()
+            # Test database connection with timeout and retry
+            session = None
+            db_status = "disconnected"
+            try:
+                session = SessionLocal()
+                from sqlalchemy import text
+                result = session.execute(text("SELECT 1"))
+                result.fetchone()
+                session.commit()
+                db_status = "connected"
+            except Exception as db_e:
+                logger.warning(f"Health check database error: {db_e}")
+                db_status = f"error: {str(db_e)[:50]}"
+            finally:
+                if session:
+                    try:
+                        session.close()
+                    except:
+                        pass
 
             # Test bot connectivity (quick test)
             try:
@@ -152,13 +233,13 @@ if app:
                 pass
 
             return jsonify({
-                'status': 'healthy',
+                'status': 'healthy' if db_status == 'connected' else 'degraded',
                 'timestamp': datetime.now(timezone.utc).isoformat(),
-                'database': 'connected',
+                'database': db_status,
                 'bot_status': bot_status,
                 'uptime_seconds': int((datetime.now(timezone.utc) - datetime.fromisoformat('2025-01-01T00:00:00')).total_seconds()) % 86400,
                 'resources': resource_status
-            }), 200
+            }), 200 if db_status == 'connected' else 503
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return jsonify({
