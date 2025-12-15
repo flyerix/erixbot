@@ -277,11 +277,8 @@ def initialize_database():
         logger.error(f"❌ Database initialization failed: {e}")
         logger.warning("⚠️ Starting without database connection - will retry later")
         
-        # Create a dummy SessionLocal that raises an error when used
-        def dummy_session():
-            raise Exception("Database not available - connection failed at startup")
-        
-        SessionLocal = dummy_session
+        # Set SessionLocal to None when database unavailable
+        SessionLocal = None
         return False
 
 # Try to initialize database, but don't fail if it doesn't work
@@ -305,7 +302,8 @@ def retry_database_connection():
         logger.info("🔄 Retrying database connection...")
         engine = create_engine_with_fallback(DATABASE_URL, pool_size, max_overflow)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        models.SessionLocal = SessionLocal
+        if models:
+            models.SessionLocal = SessionLocal
         
         # Test the connection
         if test_database_connection():
@@ -357,6 +355,11 @@ else:
 # Test database connection with SSL
 def test_database_connection():
     """Test database connection with proper error handling"""
+    # Check if database is available first
+    if not database_available or not SessionLocal or not callable(SessionLocal):
+        logger.warning("⚠️ Database not available for connection test")
+        return False
+    
     max_retries = 5
     for attempt in range(max_retries):
         try:
