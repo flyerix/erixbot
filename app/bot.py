@@ -4645,15 +4645,9 @@ async def run_bot_main_loop():
     # Register ALL handlers
     logger.info("📝 Registering all handlers...")
     
-    # Command handlers
+    # Command handlers - only register existing functions
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("dashboard", dashboard_command))
-    application.add_handler(CommandHandler("renew", renew_command))
-    application.add_handler(CommandHandler("support", support_command))
-    application.add_handler(CommandHandler("stop_contact", stop_contact_command))
-    application.add_handler(CommandHandler("stats", stats_command))
 
     # Message handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
