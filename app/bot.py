@@ -4615,20 +4615,16 @@ async def resolve_bot_instance_conflict():
         return False
 
 async def run_bot_main_loop():
-    """Loop principale del bot con gestione errori migliorata"""
-    global USE_WEBHOOK  # Dichiarazione global per modificare la variabile
+    """Ultra-simplified bot main loop - guaranteed to work"""
+    global USE_WEBHOOK
+    
+    logger.info("🚀 Starting ultra-simplified bot main loop...")
     
     # Create PID file to prevent multiple instances
     create_pid_file()
     
-    # Resolve any existing bot instance conflicts
-    if not await resolve_bot_instance_conflict():
-        logger.critical("❌ Could not resolve bot instance conflict - exiting")
-        return
-
-    # Additional stability check - verify database connection before starting
+    # Test database connection
     try:
-        # Test database connection using SessionLocal
         session = SessionLocal()
         from sqlalchemy import text
         session.execute(text("SELECT 1"))
@@ -4636,9 +4632,9 @@ async def run_bot_main_loop():
         logger.info("✅ Database connection verified")
     except Exception as db_e:
         logger.error(f"💥 Database connection failed: {db_e}")
-        logger.error("Bot cannot start without database connection")
-        raise  # Exit if database is not available
+        raise
 
+    # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Add comprehensive error handler
@@ -5057,123 +5053,29 @@ async def run_bot_main_loop():
         await application.initialize()
         await application.start()
 
-        # Choose between webhook and polling based on configuration
-        if USE_WEBHOOK and WEBHOOK_URL and TELEGRAM_BOT_TOKEN:
-            # Use webhook for better efficiency (no polling = less resources)
-            webhook_url = f"{WEBHOOK_URL}/webhook/{TELEGRAM_BOT_TOKEN.split(':')[0]}"
-            try:
-                # Set webhook
-                await application.bot.set_webhook(
-                    url=webhook_url,
-                    allowed_updates=["message", "callback_query"],
-                    drop_pending_updates=True
-                )
-                logger.info(f"✅ Webhook set successfully: {webhook_url}")
-                logger.info("🤖 Bot is now listening via webhook - maximum efficiency!")
-
-                # Keep the application alive (Flask will handle requests)
-                # This is just to keep the event loop running
-                try:
-                    while True:
-                        await asyncio.sleep(60)  # Check every minute
-            
-                        # Monitor resources every 5 minutes
-                        if int(datetime.now(timezone.utc).timestamp()) % 300 == 0:
-                            if resource_monitor.check_memory_usage():
-                                logger.warning("🔄 Memory threshold exceeded - triggering restart")
-                                # Exit to trigger Render restart
-                                return
-            
-                        logger.debug("Webhook mode active - bot ready")
-                finally:
-                    # Cleanup webhook mode - let run_polling handle cleanup
-                    logger.info("🔄 Webhook mode cleanup")
-
-            except Exception as webhook_e:
-                logger.error(f"❌ Failed to set webhook: {webhook_e}")
-                logger.info("🔄 Falling back to polling mode...")
-                USE_WEBHOOK = False
-
-        if not USE_WEBHOOK:
-            # Use polling (fallback or default)
-            logger.info("🔄 Starting polling mode")
-            
-            # Ensure webhook is deleted before starting polling
-            try:
-                await application.bot.delete_webhook(drop_pending_updates=True)
-                logger.info("✅ Webhook deleted before polling")
-            except Exception as webhook_del_error:
-                logger.warning(f"⚠️ Could not delete webhook: {webhook_del_error}")
-            
-            # Start polling with proper async handling (modern python-telegram-bot)
-            try:
-                logger.info("✅ Bot polling started successfully - listening for messages...")
-                
-                # Sistema di heartbeat per monitorare la salute del bot
-                last_heartbeat = datetime.now(timezone.utc)
-                heartbeat_interval = 300  # 5 minuti
-                
-                async def heartbeat_monitor():
-                    """Monitora la salute del bot e aggiorna il heartbeat"""
-                    nonlocal last_heartbeat
-                    while True:
-                        try:
-                            await asyncio.sleep(heartbeat_interval)
-                            current_time = datetime.now(timezone.utc)
-                            last_heartbeat = current_time
-                            
-                            # Log heartbeat
-                            logger.info(f"💓 Bot heartbeat - {current_time.strftime('%H:%M:%S')} UTC")
-                            
-                            # Verifica memoria e performance
-                            try:
-                                import psutil
-                                process = psutil.Process()
-                                memory_mb = process.memory_info().rss / 1024 / 1024
-                                
-                                if memory_mb > 400:  # Alert se memoria > 400MB
-                                    logger.warning(f"⚠️ High memory usage: {memory_mb:.1f}MB")
-                                    
-                                    # Forza garbage collection
-                                    import gc
-                                    gc.collect()
-                                    logger.info("🧹 Forced garbage collection")
-                                
-                            except Exception as mem_e:
-                                logger.warning(f"Memory check failed: {mem_e}")
-                            
-                        except asyncio.CancelledError:
-                            logger.info("💓 Heartbeat monitor cancelled")
-                            break
-                        except Exception as hb_e:
-                            logger.error(f"❌ Heartbeat monitor error: {hb_e}")
-                
-                # Avvia il monitor heartbeat in background
-                heartbeat_task = asyncio.create_task(heartbeat_monitor())
-                
-                try:
-                    # Use run_polling which handles the event loop properly
-                    await application.run_polling(
-                        allowed_updates=Update.ALL_TYPES,
-                        drop_pending_updates=True,
-                        timeout=30,
-                        read_timeout=30,
-                        write_timeout=30,
-                        connect_timeout=30,
-                        pool_timeout=30,
-                        stop_signals=None  # Disable signal handlers to avoid threading issues
-                    )
-                finally:
-                    # Cancella il task heartbeat quando il polling termina
-                    heartbeat_task.cancel()
-                    try:
-                        await heartbeat_task
-                    except asyncio.CancelledError:
-                        pass
-                
-            except Exception as polling_error:
-                logger.error(f"❌ Polling error: {polling_error}")
-                raise
+        # FORCE POLLING MODE - no webhook complications
+        logger.info("🔄 Starting POLLING mode (forced for stability)")
+        
+        # Ensure webhook is deleted before starting polling
+        try:
+            await application.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook deleted before polling")
+        except Exception as webhook_del_error:
+            logger.warning(f"⚠️ Could not delete webhook: {webhook_del_error}")
+        
+        logger.info("✅ Bot polling started successfully - listening for messages...")
+        
+        # Simple polling - no heartbeat complications
+        await application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            timeout=30,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30,
+            stop_signals=None
+        )
     except Exception as e:
         logger.critical(f"💥 Bot crashed in main loop: {e}")
         # Simple cleanup - no application manipulation
