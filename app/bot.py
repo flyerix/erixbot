@@ -321,8 +321,8 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ADMIN_IDS = [int(id.strip()) for id in os.getenv('ADMIN_IDS', '').split(',') if id.strip()]
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
-# Configurazione metodo ricezione aggiornamenti
-USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
+# Configurazione metodo ricezione aggiornamenti - FORCE POLLING for stability
+USE_WEBHOOK = False  # Force polling mode to ensure bot responds to commands
 
 # Validate required environment variables
 if not TELEGRAM_BOT_TOKEN:
