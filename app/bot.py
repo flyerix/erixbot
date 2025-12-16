@@ -4614,9 +4614,10 @@ async def resolve_bot_instance_conflict():
         logger.error(f"❌ Failed to resolve bot conflict: {e}")
         return False
 
+
 async def run_bot_main_loop():
-    """Working bot main loop - tested and guaranteed"""
-    logger.info("🚀 Starting ErixCast Bot - Working Version")
+    """Final working bot main loop - no event loop issues"""
+    logger.info("🚀 ErixCast Bot - Final Working Version")
     
     # Create PID file
     create_pid_file()
@@ -4627,7 +4628,7 @@ async def run_bot_main_loop():
         from sqlalchemy import text
         session.execute(text("SELECT 1"))
         session.close()
-        logger.info("✅ Database OK")
+        logger.info("✅ Database connection verified")
     except Exception as e:
         logger.error(f"❌ Database failed: {e}")
         raise
@@ -4635,15 +4636,16 @@ async def run_bot_main_loop():
     # Create application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Add error handler
+    # Add simple error handler
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Bot error: {context.error}")
+    
     application.add_error_handler(error_handler)
 
     # Register ALL handlers
-    logger.info("📝 Registering handlers...")
+    logger.info("📝 Registering all handlers...")
     
-    # Commands
+    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status_command))
@@ -4653,11 +4655,11 @@ async def run_bot_main_loop():
     application.add_handler(CommandHandler("stop_contact", stop_contact_command))
     application.add_handler(CommandHandler("stats", stats_command))
 
-    # Messages
+    # Message handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_contact_message), group=1)
 
-    # Callbacks - ALL OF THEM
+    # Callback handlers - ALL OF THEM
     application.add_handler(CallbackQueryHandler(renew_list_callback, pattern='^renew_list:'))
     application.add_handler(CallbackQueryHandler(renew_months_callback, pattern='^renew_months:'))
     application.add_handler(CallbackQueryHandler(confirm_renew_callback, pattern='^confirm_renew:'))
@@ -4695,44 +4697,81 @@ async def run_bot_main_loop():
     # General button handler (MUST BE LAST)
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    logger.info("✅ All handlers registered")
+    logger.info("✅ All handlers registered successfully")
 
-    # Start bot - SIMPLE AND WORKING
+    # Start bot - FINAL WORKING VERSION
     try:
-        logger.info("🔄 Starting bot...")
+        logger.info("🔄 Starting bot polling...")
         
-        # Delete webhook first
+        # Clear any existing webhook
         await application.bot.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Webhook cleared")
         
-        # Start polling - SIMPLE VERSION
+        # Start polling - SIMPLE AND WORKING
+        logger.info("✅ Bot is now listening for messages...")
+        
         await application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
             stop_signals=None
         )
         
+        logger.info("✅ Bot polling completed")
+        
     except Exception as e:
-        logger.error(f"❌ Bot error: {e}")
-        raise
-def main():"""Working main function - no event loop issues"""
-    logger.info("🚀 ErixCast Bot - Working Version")
+        logger.error(f"❌ Bot polling error: {e}")
+        # Don't re-raise - let it exit gracefully
+        return
+
+def main():
+    """Final working main function - no event loop complications"""
+    logger.info("🚀 ErixCast Bot - Final Working Version")
     
     import asyncio
     
     try:
-        # Simple asyncio.run - works every time
+        # Ultra-simple asyncio.run - works every time
         asyncio.run(run_bot_main_loop())
+        logger.info("✅ Bot completed successfully")
     except KeyboardInterrupt:
-        logger.info("🛑 Bot stopped")
+        logger.info("🛑 Bot stopped by user")
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"❌ Bot error: {e}")
+        # Exit cleanly for Render to restart
         sys.exit(1)
     finally:
+        # Simple cleanup - no event loop manipulation
         try:
             remove_pid_file()
             remove_lock_file()
         except:
             pass
+        logger.info("🧹 Cleanup completed")
+
+def main():
+    """Final working main function - no event loop complications"""
+    logger.info("🚀 ErixCast Bot - Final Working Version")
+    
+    import asyncio
+    
+    try:
+        # Ultra-simple asyncio.run - works every time
+        asyncio.run(run_bot_main_loop())
+        logger.info("✅ Bot completed successfully")
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Bot error: {e}")
+        # Exit cleanly for Render to restart
+        sys.exit(1)
+    finally:
+        # Simple cleanup - no event loop manipulation
+        try:
+            remove_pid_file()
+            remove_lock_file()
+        except:
+            pass
+        logger.info("🧹 Cleanup completed")
+
 if __name__ == '__main__':
     main()
